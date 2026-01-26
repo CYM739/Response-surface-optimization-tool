@@ -5,7 +5,7 @@ statsmodels
 scikit-learn
 python-docx
 matplotlib
-streamlit
+streamlit>=1.40.0
 scipy
 scikit-optimize
 seaborn
