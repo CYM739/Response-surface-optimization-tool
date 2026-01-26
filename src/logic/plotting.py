@@ -574,6 +574,11 @@ def calculate_synergy_surface_grid(model, drug1, drug2, fixed_vars, range1, rang
         
     # --- PREDICT COMBINATION EFFECT (Z-Axis) ---
     z_combo_flat = model.predict(predict_df)
+    
+    # FIX: Ensure it is a numpy array (handle Series)
+    if hasattr(z_combo_flat, 'values'):
+        z_combo_flat = z_combo_flat.values
+        
     # Clip to 0-1 (assuming inhibition)
     z_combo_flat = np.clip(z_combo_flat, 0, 1)
     
@@ -583,12 +588,14 @@ def calculate_synergy_surface_grid(model, drug1, drug2, fixed_vars, range1, rang
     d1_df = predict_df.copy()
     d1_df[drug2] = 0.0
     z_d1_flat = model.predict(d1_df)
+    if hasattr(z_d1_flat, 'values'): z_d1_flat = z_d1_flat.values
     z_d1_flat = np.clip(z_d1_flat, 0, 1)
     
     # Drug 2 Alone (Drug 1 = 0)
     d2_df = predict_df.copy()
     d2_df[drug1] = 0.0
     z_d2_flat = model.predict(d2_df)
+    if hasattr(z_d2_flat, 'values'): z_d2_flat = z_d2_flat.values
     z_d2_flat = np.clip(z_d2_flat, 0, 1)
     
     # --- CALCULATE EXPECTATION & SYNERGY ---
