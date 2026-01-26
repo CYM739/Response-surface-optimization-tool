@@ -2,158 +2,153 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from logic.data_processing import calculate_synergy
-from logic.plotting import plot_synergy_heatmap
+import plotly.express as px
+from logic.data_processing import calculate_high_throughput_synergy
 from utils.ui_helpers import format_variable_options
-from utils.state_management import clear_synergy_results
-
-def validate_synergy_data(df, drug1_col, drug2_col):
-    """
-    Checks if the dataframe contains the necessary single-agent control data.
-    """
-    # Convert to numeric for validation to match processing logic
-    d1_vals = pd.to_numeric(df[drug1_col], errors='coerce').fillna(0)
-    d2_vals = pd.to_numeric(df[drug2_col], errors='coerce').fillna(0)
-    
-    # Check for 0 presence
-    has_drug1_zero = (np.abs(d1_vals) < 1e-6).any()
-    has_drug2_zero = (np.abs(d2_vals) < 1e-6).any()
-    
-    if not has_drug1_zero or not has_drug2_zero:
-        st.error(f"⚠️ **Critical Error:** Missing '0' dose control. The dataset must contain data where {drug1_col}=0 and {drug2_col}=0.")
-        return False
-        
-    # Check for Single Agent Rows (Rows where one drug is >0 and other is 0)
-    # This detects the "Only combination points" problem
-    d1_single_agent = df[(d1_vals > 1e-6) & (np.abs(d2_vals) < 1e-6)]
-    d2_single_agent = df[(np.abs(d1_vals) < 1e-6) & (d2_vals > 1e-6)]
-
-    if d1_single_agent.empty or d2_single_agent.empty:
-        missing = []
-        if d1_single_agent.empty: missing.append(f"Single-agent {drug1_col} (where {drug2_col}=0)")
-        if d2_single_agent.empty: missing.append(f"Single-agent {drug2_col} (where {drug1_col}=0)")
-        
-        st.warning(f"""
-        ⚠️ **Data Warning: Missing Single-Agent Arms**
-        Your data seems to contain combinations, but is missing the pure single-agent experiments:
-        - Missing: **{', '.join(missing)}**
-        
-        Without these reference points, the synergy calculation (which compares Combination vs Single Agent) will result in empty (NaN) cells for most of the matrix.
-        """)
-        # We don't return False here because maybe they only have partial data, but we warn strongly.
-        
-    return True
 
 def render():
-    """Renders all UI components and logic for the Synergy Analysis tab."""
-    st.subheader("🤝 Drug Combination Synergy Analysis")
-
-    if 'analysis_done' not in st.session_state or not st.session_state.analysis_done:
-        st.info("Load a project and run or load an analysis from the 'Project Library' to use this tool.")
-        return
-        
-    st.info("""
-    This tool calculates synergy based on validated pharmacological models (Nature Communications 2025).
-    Select the model below to see interpretation guidelines.
-    """)
+    """Renders the Row-Based High-Throughput Synergy Analysis Tab."""
+    st.subheader("🧪 High-Throughput Synergy Screening")
     
+    if 'analysis_done' not in st.session_state or not st.session_state.analysis_done:
+        st.info("Please load a project and run an analysis first (to enable AI-assisted reference predictions).")
+        return
+
+    st.markdown("""
+    This tool analyzes drug combinations row-by-row. It supports **3+ drug combinations** and **sparse datasets**.
+    If specific single-agent reference doses are missing, it uses your trained AI model to estimate them.
+    """)
+
     with st.container(border=True):
-        st.markdown("##### Configuration")
-        col1, col2, col3 = st.columns(3)
-
-        drug_options = format_variable_options(st.session_state.independent_vars)
-        drug1_formatted = col1.selectbox("Select Drug 1 (Y-axis)", options=drug_options, key="synergy_drug1", on_change=clear_synergy_results)
-        drug1 = drug1_formatted.split(":")[0]
+        st.markdown("##### ⚙️ Screening Configuration")
         
-        drug2_options = [opt for opt in drug_options if not opt.startswith(drug1)]
-        drug2_formatted = col2.selectbox("Select Drug 2 (X-axis)", options=drug2_options, key="synergy_drug2", on_change=clear_synergy_results)
-        drug2 = drug2_formatted.split(":")[0]
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Multi-select for drugs (N-way combinations)
+            drug_options = st.session_state.independent_vars
+            selected_drugs = st.multiselect(
+                "Select All Drug Columns (Dose)", 
+                options=drug_options,
+                default=drug_options[:2] if len(drug_options) >=2 else drug_options
+            )
+            
+        with col2:
+            # Select Effect
+            effect_options = st.session_state.dependent_vars
+            selected_effect = st.selectbox("Select Effect/Response Column", options=effect_options)
+            
+            # Select Model for Imputation
+            model_names = list(st.session_state.get('wrapped_models', {}).keys())
+            if model_names:
+                selected_model_name = st.selectbox("Select AI Model (for filling missing controls)", options=model_names)
+            else:
+                st.warning("No models found. Analysis will fail if reference data is missing.")
+                selected_model_name = None
 
-        effect_options = format_variable_options(st.session_state.dependent_vars)
-        effect_formatted = col3.selectbox("Select Effect Variable", options=effect_options, key="synergy_effect", on_change=clear_synergy_results)
-        effect = effect_formatted.split(":")[0]
+    if st.button("🚀 Run Screening Analysis", type="primary"):
+        if not selected_drugs or not selected_effect:
+            st.error("Please select drugs and an effect column.")
+            return
 
-        transform_data = st.checkbox("Data is cell viability (0-1); transform to inhibition (1-viability).", value=True, key="transform_toggle", on_change=clear_synergy_results)
-        if transform_data:
-            st.markdown(f"The analysis will use `1 - {effect}` as the measure of inhibition.")
-        else:
-             st.markdown(f"The analysis will use the raw '{effect}' values. Ensure higher values represent greater drug effect (Inhibition).")
-
-        synergy_model_display = st.selectbox(
-            "Select Synergy Model",
-            ["Gamma (Recommended)", "HSA (Excess Highest Single Agent)"],
-            on_change=clear_synergy_results
-        )
-        synergy_model_key = synergy_model_display.split(" ")[0].lower()
-
-        if synergy_model_key == 'gamma':
-            st.success("""
-            **Gamma Score Interpretation (Ratio):**
-            * **< 0.95:** Synergistic.
-            * **~ 1.0:** Additive.
-            * **> 1.0:** Antagonistic.
-            """)
-        elif synergy_model_key == 'hsa':
-            st.success("""
-            **Excess HSA Interpretation (Difference):**
-            * **> 0:** Synergistic.
-            * **< 0:** Antagonistic.
-            """)
-
-        validate_synergy_data(st.session_state.exp_df, drug1, drug2)
-
-    if st.button("Calculate Synergy", type="primary"):
-        with st.spinner("Calculating synergy scores..."):
+        with st.spinner("Analyzing combinations... detecting direction... predicting missing controls..."):
             try:
-                df_synergy = st.session_state.exp_df.copy()
+                # Get the model object
+                model_obj = st.session_state.wrapped_models.get(selected_model_name) if selected_model_name else None
                 
-                if transform_data:
-                    if df_synergy[effect].max() > 1.0:
-                         st.warning("Data appears to be in percentage (0-100). Treating as 0-1 fraction.")
-                    df_synergy[effect] = 1 - df_synergy[effect]
-
-                synergy_matrix = calculate_synergy(
-                    dataframe=df_synergy,
-                    drug1_name=drug1,
-                    drug2_name=drug2,
-                    effect_name=effect,
-                    model=synergy_model_key
+                # Run Logic
+                df_results, direction = calculate_high_throughput_synergy(
+                    df=st.session_state.exp_df,
+                    dose_cols=selected_drugs,
+                    effect_col=selected_effect,
+                    model=model_obj
                 )
                 
-                st.session_state.synergy_matrix = synergy_matrix
-                st.session_state.synergy_drugs = (drug1, drug2)
-                st.session_state.synergy_model_name = synergy_model_display
-
+                # Store in session state
+                st.session_state.synergy_results = df_results
+                st.session_state.synergy_direction = direction
+                st.session_state.synergy_active_drugs = selected_drugs
+                
+                st.success(f"Analysis Complete! Auto-detected Data Type: **{direction.title()}**")
+                
             except Exception as e:
-                st.error(f"An error occurred during calculation: {e}")
-                clear_synergy_results()
-    
-    if st.session_state.get('synergy_matrix') is not None and not st.session_state.synergy_matrix.empty:
-        st.write("---")
-        synergy_matrix = st.session_state.synergy_matrix
-        drug1, drug2 = st.session_state.synergy_drugs
-        model_name = st.session_state.get('synergy_model_name', 'Synergy')
+                st.error(f"Analysis Failed: {e}")
+                st.exception(e)
+
+    # --- RESULTS DISPLAY ---
+    if st.session_state.get('synergy_results') is not None:
+        results = st.session_state.synergy_results
+        direction = st.session_state.get('synergy_direction', 'Unknown')
         
-        # Check for empty calculations
-        nan_count = synergy_matrix.isna().sum().sum()
-        total_cells = synergy_matrix.size
-        if nan_count > 0:
-            st.warning(f"⚠️ **Incomplete Result:** {nan_count}/{total_cells} cells are empty (NaN). This confirms that Single-Agent reference data for those specific dose combinations was missing from the input.")
-
-        with st.expander("🔢 Raw Synergy Data (Matrix)", expanded=True):
-            st.dataframe(synergy_matrix, use_container_width=True)
-            csv = synergy_matrix.to_csv().encode('utf-8')
-            st.download_button(
-                label="Download Synergy Matrix as CSV",
-                data=csv,
-                file_name=f'synergy_matrix_{model_name}.csv',
-                mime='text/csv',
+        st.write("---")
+        st.subheader("📊 Analysis Results")
+        
+        # 1. Summary Metrics
+        synergy_hits = results[results['HSA_Synergy'] > 0.1]
+        antagonism_hits = results[results['HSA_Synergy'] < -0.1]
+        
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Total Combinations", len(results[results['Analysis_Note'] != 'Single Agent / Control']))
+        m2.metric("Synergistic Hits (HSA > 0.1)", len(synergy_hits))
+        m3.metric("Antagonistic Hits (HSA < -0.1)", len(antagonism_hits))
+        
+        # 2. Main Data Table
+        st.markdown("#### Detailed Data Table")
+        
+        # Filter options
+        filter_col, _ = st.columns([1,2])
+        show_only_combos = filter_col.checkbox("Hide Single Agents / Controls", value=True)
+        
+        display_df = results.copy()
+        if show_only_combos:
+            display_df = display_df[display_df['Analysis_Note'] != 'Single Agent / Control']
+        
+        # Color highlighting
+        def color_synergy(val):
+            if pd.isna(val): return ''
+            if val > 0.1: return 'background-color: #d4edda; color: #155724' # Green
+            if val < -0.1: return 'background-color: #f8d7da; color: #721c24' # Red
+            return ''
+            
+        st.dataframe(
+            display_df.style.map(color_synergy, subset=['HSA_Synergy', 'Bliss_Synergy'])
+                     .format("{:.4f}", subset=['HSA_Synergy', 'Bliss_Synergy', 'std_effect']),
+            use_container_width=True,
+            height=400
+        )
+        
+        # Download
+        csv = display_df.to_csv(index=False).encode('utf-8')
+        st.download_button("Download Results CSV", csv, "synergy_screening_results.csv", "text/csv")
+        
+        # 3. Visualization
+        st.write("---")
+        st.subheader("📈 Visualization")
+        
+        tab1, tab2 = st.tabs(["Distribution", "Scatter Plot"])
+        
+        with tab1:
+            # Histogram of scores
+            fig_hist = px.histogram(
+                display_df, 
+                x="HSA_Synergy", 
+                nbins=30, 
+                title="Distribution of Synergy Scores (HSA)",
+                color_discrete_sequence=['#636EFA']
             )
-
-        st.subheader("Synergy Heatmap")
-        descriptions = st.session_state.variable_descriptions
-        drug1_desc = descriptions.get(drug1, drug1)
-        drug2_desc = descriptions.get(drug2, drug2)
-
-        fig = plot_synergy_heatmap(synergy_matrix, drug1_desc, drug2_desc, model_name)
-        st.plotly_chart(fig, use_container_width=True)
+            fig_hist.add_vline(x=0, line_dash="dash", line_color="black")
+            st.plotly_chart(fig_hist, use_container_width=True)
+            
+        with tab2:
+            # Scatter: Total Dose vs Synergy
+            display_df['Total_Dose'] = display_df[st.session_state.synergy_active_drugs].sum(axis=1)
+            fig_scat = px.scatter(
+                display_df,
+                x="Total_Dose",
+                y="HSA_Synergy",
+                color="Analysis_Note",
+                hover_data=st.session_state.synergy_active_drugs,
+                title="Total Dose vs. Synergy Score"
+            )
+            fig_scat.add_hline(y=0, line_dash="dash", line_color="black")
+            st.plotly_chart(fig_scat, use_container_width=True)
