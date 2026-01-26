@@ -5,7 +5,8 @@ import os
 import multiprocessing
 import json
 import sys
-# Removed evaluation_view from imports
+if not hasattr(np, 'int'):
+    np.int = int
 from views import library_view, plotting_view, optimizer_view, ai_optimizer_view, synergy_view, diagnostics_view
 from utils import state_management
 from logic.models import RandomForestWrapper
