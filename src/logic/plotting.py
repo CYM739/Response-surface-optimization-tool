@@ -528,4 +528,122 @@ def plot_parallel_coordinates(model_1, model_2, independent_vars, bounds, num_sa
     
     fig.update_layout(title="Parallel Coordinates", height=600)
     
-    return fig, df # <--- RETURN BOTH
+    return fig, df 
+
+def plot_synergy_heatmap(synergy_matrix, drug1_name, drug2_name, model_name):
+    """
+    Standard 2D Heatmap for matrix data.
+    """
+    fig = px.imshow(
+        synergy_matrix,
+        labels=dict(x=drug2_name, y=drug1_name, color="Synergy Score"),
+        x=synergy_matrix.columns,
+        y=synergy_matrix.index,
+        color_continuous_scale="RdBu_r", 
+        origin='lower'
+    )
+    fig.update_layout(
+        title=f"Synergy Heatmap ({model_name})",
+        xaxis_title=drug2_name,
+        yaxis_title=drug1_name
+    )
+    return fig
+
+def calculate_synergy_surface_grid(model, drug1, drug2, fixed_vars, range1, range2, method='hsa'):
+    """
+    Generates a grid for 3D plotting that includes:
+    1. Z-axis: The Predicted Combination Effect.
+    2. Color-axis: The Calculated Synergy Score (Observed - Expected).
+    
+    Uses the AI model to predict single-agent baselines dynamically.
+    """
+    # 1. Create Grid
+    x_values = np.linspace(range1[0], range1[1], 50)
+    y_values = np.linspace(range2[0], range2[1], 50)
+    x_grid, y_grid = np.meshgrid(x_values, y_values)
+    
+    # Flatten for prediction
+    flat_len = x_grid.size
+    predict_df = pd.DataFrame(index=range(flat_len))
+    predict_df[drug1] = x_grid.flatten()
+    predict_df[drug2] = y_grid.flatten()
+    
+    # Set fixed variables
+    for var, val in fixed_vars.items():
+        predict_df[var] = val
+        
+    # --- PREDICT COMBINATION EFFECT (Z-Axis) ---
+    z_combo_flat = model.predict(predict_df)
+    # Clip to 0-1 (assuming inhibition)
+    z_combo_flat = np.clip(z_combo_flat, 0, 1)
+    
+    # --- PREDICT SINGLE AGENT BASELINES (For Synergy Calc) ---
+    
+    # Drug 1 Alone (Drug 2 = 0)
+    d1_df = predict_df.copy()
+    d1_df[drug2] = 0.0
+    z_d1_flat = model.predict(d1_df)
+    z_d1_flat = np.clip(z_d1_flat, 0, 1)
+    
+    # Drug 2 Alone (Drug 1 = 0)
+    d2_df = predict_df.copy()
+    d2_df[drug1] = 0.0
+    z_d2_flat = model.predict(d2_df)
+    z_d2_flat = np.clip(z_d2_flat, 0, 1)
+    
+    # --- CALCULATE EXPECTATION & SYNERGY ---
+    if method == 'bliss':
+        # Bliss: Expected = 1 - (1-D1)*(1-D2)  (Probabilistic independence)
+        expected_flat = 1 - ((1 - z_d1_flat) * (1 - z_d2_flat))
+    else:
+        # HSA: Expected = Max(D1, D2) (Best single agent)
+        expected_flat = np.maximum(z_d1_flat, z_d2_flat)
+        
+    synergy_flat = z_combo_flat - expected_flat
+    
+    # Reshape all to grid
+    z_grid = z_combo_flat.reshape(x_grid.shape)
+    synergy_grid = synergy_flat.reshape(x_grid.shape)
+    
+    return x_grid, y_grid, z_grid, synergy_grid
+
+def plot_3d_synergy_surface(x, y, z, synergy, d1_name, d2_name, method):
+    """
+    Plots the surface with Discrete Coloring (Green=Synergy, Red=Antagonism).
+    """
+    # Define Discrete Colorscale (Option B)
+    # Mapping: -1.0 to -0.05 -> Red
+    #          -0.05 to 0.05 -> Gray
+    #           0.05 to 1.0  -> Green
+    
+    # We construct a custom scale.
+    # Note: surfacecolor needs to be normalized or we use cmin/cmax
+    
+    fig = go.Figure(data=[go.Surface(
+        x=x, 
+        y=y, 
+        z=z,
+        surfacecolor=synergy,
+        colorscale=[
+            [0.0, "rgb(200, 50, 50)"],   # Deep Red (Antagonism)
+            [0.45, "rgb(240, 180, 180)"], # Light Red
+            [0.45, "rgb(220, 220, 220)"], # Gray start (Neutral)
+            [0.55, "rgb(220, 220, 220)"], # Gray end
+            [0.55, "rgb(180, 240, 180)"], # Light Green (Synergy)
+            [1.0, "rgb(50, 200, 50)"]     # Deep Green
+        ],
+        cmin=-0.5, # Clamp range so colors don't skew
+        cmax=0.5,
+        colorbar=dict(title=f"Synergy ({method.upper()})")
+    )])
+
+    fig.update_layout(
+        title=f"3D Synergy Surface: {d1_name} vs {d2_name}",
+        scene=dict(
+            xaxis_title=d1_name,
+            yaxis_title=d2_name,
+            zaxis_title="Inhibition (Predicted)"
+        ),
+        margin=dict(l=0, r=0, b=0, t=40)
+    )
+    return fig
