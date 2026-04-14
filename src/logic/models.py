@@ -27,13 +27,16 @@ from zipfile import ZipFile
 from .helpers import _add_polynomial_terms
 
 class OLSWrapper:
-    def __init__(self, model, formula):
+    def __init__(self, model, formula, independent_vars=None):
         if model is None:
             raise ValueError("Model cannot be None.")
         self.model = model
         self.formula = formula
         self.params = model.params
-        self.independent_vars = [term for term in model.model.exog_names if '_' not in term and '*' not in term and ':' not in term and 'Intercept' not in term]
+        if independent_vars is not None:
+            self.independent_vars = list(independent_vars)
+        else:
+            self.independent_vars = [term for term in model.model.exog_names if '_' not in term and '*' not in term and ':' not in term and 'Intercept' not in term]
     def predict(self, dataframe):
         """
         Ensures polynomial terms are present before making a prediction.
