@@ -35,8 +35,11 @@ def analyze_csv(full_dataframe):
         if data_df[col].dtype == 'object':
             try:
                 cleaned_col = data_df[col].str.replace(',', '', regex=False)
-                data_df[col] = pd.to_numeric(cleaned_col)
-            except (AttributeError, ValueError, TypeError):
+                converted = pd.to_numeric(cleaned_col, errors='coerce')
+                # Only apply conversion if at least some values are numeric
+                if converted.notna().any():
+                    data_df[col] = converted
+            except (AttributeError, TypeError):
                 pass
 
     ignore_prefixes = ["Cell_", "Zebrafish_", "Mouse_", "Patient_", "Control_"]
@@ -87,25 +90,31 @@ def expand_terms(dataframe, all_alphabet_vars):
 def generate_model_formula(C_col, all_alphabet_vars):
     """
     Constructs the model formula string required by the `statsmodels` library.
+    Uses Q() quoting to safely handle column names with special characters.
     """
     terms = []
     for header in all_alphabet_vars:
-        terms.extend([header, f"{header}_sq"])
+        terms.extend([f'Q("{header}")', f'Q("{header}_sq")'])
 
     if len(all_alphabet_vars) > 1:
-        interaction_terms = [f"{var1}*{var2}" for i, var1 in enumerate(all_alphabet_vars) for var2 in all_alphabet_vars[i + 1:]]
+        interaction_terms = [f'Q("{var1}"):Q("{var2}")' for i, var1 in enumerate(all_alphabet_vars) for var2 in all_alphabet_vars[i + 1:]]
         terms.extend(interaction_terms)
 
-    return f"{C_col} ~ " + " + ".join(terms)
+    return f'Q("{C_col}") ~ ' + " + ".join(terms)
 
 def run_analysis(dataframe, independent_vars, dependent_var, model_type, model_params={}, variable_descriptions=None):
     """
     Main analysis engine. Fits the specified model and returns a wrapped model object.
     """
     if model_type == 'Polynomial OLS':
+        # Ensure dependent and independent variables are numeric to prevent
+        # patsy from one-hot encoding string columns (causes multi-column endog error)
+        for col in [dependent_var] + independent_vars:
+            dataframe[col] = pd.to_numeric(dataframe[col], errors='coerce')
+        dataframe = dataframe.dropna(subset=[dependent_var] + independent_vars)
         model_formula = generate_model_formula(dependent_var, independent_vars)
         ols_model = smf.ols(model_formula, data=dataframe).fit()
-        return OLSWrapper(ols_model, model_formula)
+        return OLSWrapper(ols_model, model_formula, independent_vars=independent_vars)
 
     elif model_type == 'SVR':
         svr_wrapper = SVRWrapper(independent_vars)
