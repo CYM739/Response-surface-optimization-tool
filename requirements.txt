@@ -1,0 +1,11 @@
+pandas
+numpy
+plotly
+statsmodels
+scikit-learn
+python-docx
+matplotlib
+streamlit>=1.40.0
+scipy
+scikit-optimize
+seaborn

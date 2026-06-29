@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Surface Explorer</title>
+<script src="plotly-2.32.0.min.js"></script>
+<style>
+  :root{
+    --bg:#ffffff; --panel:#ffffff; --soft:#f0f2f6; --soft2:#f7f8fa;
+    --border:rgba(49,51,63,.15); --border2:rgba(49,51,63,.1);
+    --ink:#31333f; --ink2:#555867; --muted:#808495;
+    --primary:#ff4b4b; --primary-d:#e23b3b;
+    --green:#1f9d57; --amber:#c98a14; --red:#d83b3b;
+    --mono:ui-monospace,Menlo,Consolas,monospace;
+    --sans:"Source Sans Pro","Segoe UI",-apple-system,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    font-size:14px;line-height:1.5;}
+  .wrap{padding:8px 14px 24px;display:grid;grid-template-columns:286px 1fr;gap:16px;}
+  .card{background:var(--panel);border:1px solid var(--border);
+    border-radius:8px;padding:14px 16px;}
+  .card h3{margin:0 0 4px;font-size:15px;font-weight:600;color:var(--ink);}
+  .card .sub{margin:0 0 10px;font-size:12.5px;color:var(--muted);}
+  label.fld{display:block;font-size:13px;color:var(--ink2);
+    margin:11px 0 4px;font-weight:600;}
+  label.chk{display:flex;align-items:center;gap:8px;cursor:pointer;
+    font-size:13px;color:var(--ink2);margin:9px 0 3px;font-weight:600;}
+  label.chk input{accent-color:var(--primary);width:15px;height:15px;}
+  select,input[type=file],input[type=text],input[type=number]{width:100%;
+    padding:7px 9px;border:1px solid var(--border);border-radius:6px;
+    font-family:var(--sans);font-size:13px;background:#fff;color:var(--ink);}
+  select:focus,input:focus{outline:none;border-color:var(--primary);
+    box-shadow:0 0 0 2px rgba(255,75,75,.18);}
+  .slider-row{margin:11px 0;}
+  .slider-row .top{display:flex;justify-content:space-between;font-size:12.5px;}
+  .slider-row .nm{font-weight:600;color:var(--ink2);}
+  .slider-row .vv{font-family:var(--mono);color:var(--ink);font-weight:600;}
+  .slider-row .ends{display:flex;justify-content:space-between;
+    font-size:10.5px;color:var(--muted);margin-top:1px;}
+  input[type=range]{width:100%;margin-top:4px;accent-color:var(--primary);}
+  #plot{background:var(--panel);border:1px solid var(--border);
+    border-radius:8px;height:486px;}
+  .stage{display:flex;flex-direction:column;gap:10px;}
+  .plotbar{display:none;align-items:center;justify-content:space-between;
+    gap:12px;padding:0 2px;}
+  .plotbar .hint{margin:0;}
+  button{font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;
+    background:var(--primary);color:#fff;border:0;border-radius:7px;
+    padding:8px 14px;transition:background .12s;}
+  button:hover{background:var(--primary-d);}
+  button.ghost{background:#fff;color:var(--ink);border:1px solid var(--border);}
+  button.ghost:hover{background:var(--soft);}
+  .msg{font-size:12.5px;padding:8px 10px;border-radius:6px;margin-top:9px;}
+  .msg.err{background:#fdecec;color:var(--red);}
+  .msg.info{background:#eef4fd;color:#2257c0;}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--border2);}
+  td.num,th.num{text-align:right;font-family:var(--mono);}
+  details{margin-top:9px;border:1px solid var(--border);border-radius:7px;
+    overflow:hidden;}
+  summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--ink2);
+    padding:9px 12px;background:var(--soft2);}
+  summary:hover{color:var(--ink);}
+  details[open]>summary{border-bottom:1px solid var(--border);}
+  .dbody{padding:11px 13px;}
+  .optrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  .optres{font-family:var(--mono);font-size:12.5px;margin-top:10px;
+    color:var(--ink2);}
+  .hint{font-size:12px;color:var(--muted);margin-top:7px;}
+  .fitsum{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:13px;}
+  .fitsum .metric{color:var(--ink2);}
+  .fitsum .metric b{color:var(--ink);font-family:var(--mono);}
+  .fitsum .sep{color:var(--border);}
+  .qbadge{display:inline-block;padding:3px 10px;border-radius:11px;
+    font-size:12px;font-weight:700;}
+  .q-great{background:#e3f5ea;color:var(--green);}
+  .q-good{background:#e3f5ea;color:var(--green);}
+  .q-fair{background:#fdf0d8;color:var(--amber);}
+  .q-poor{background:#fdecec;color:var(--red);}
+  .fitnote{font-size:12.5px;color:var(--muted);margin-top:7px;}
+  .badge{display:inline-block;padding:2px 9px;border-radius:11px;
+    font-size:11.5px;font-weight:700;background:#e3f5ea;color:var(--green);}
+  .empty{padding:48px 24px;text-align:center;color:var(--muted);font-size:13.5px;}
+  .twocol{display:flex;gap:8px;}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <!-- ===== CONTROLS ===== -->
+  <div>
+    <div class="card">
+      <h3>Data</h3>
+      <p class="sub" id="dataSource"></p>
+      <input type="file" id="csvFile" accept=".csv,text/csv">
+      <div id="dataMsg"></div>
+    </div>
+
+    <div class="card" id="ctlCard" style="margin-top:14px;display:none;">
+      <h3>Surface</h3>
+      <p class="sub">Pick the outcome and the two drugs to chart.</p>
+      <label class="fld">Response to show</label>
+      <select id="respSel"></select>
+      <label class="fld">X-axis drug</label>
+      <select id="xSel"></select>
+      <label class="fld">Y-axis drug</label>
+      <select id="ySel"></select>
+      <label class="chk" style="margin-top:12px;">
+        <input type="checkbox" id="gridChk" checked>
+        Show surface grid lines
+      </label>
+      <div id="sliderBox" style="margin-top:8px;"></div>
+    </div>
+
+    <div class="card" id="appCard" style="margin-top:14px;display:none;">
+      <h3>Display options</h3>
+      <p class="sub">Optional — change colours, titles and labels.</p>
+      <details>
+        <summary>Appearance</summary>
+        <div class="dbody">
+          <label class="fld">Colour scheme</label>
+          <select id="csSel"></select>
+
+          <label class="chk"><input type="checkbox" id="dataChk" checked>
+            Show measured data points</label>
+          <label class="chk"><input type="checkbox" id="xGridChk" checked>
+            Show X-axis background grid</label>
+          <label class="chk"><input type="checkbox" id="yGridChk" checked>
+            Show Y-axis background grid</label>
+
+          <label class="fld">Chart title</label>
+          <input type="text" id="mainTitle" placeholder="(automatic)">
+          <label class="fld">X-axis label</label>
+          <input type="text" id="xTitle" placeholder="(automatic)">
+          <label class="fld">Y-axis label</label>
+          <input type="text" id="yTitle" placeholder="(automatic)">
+          <label class="fld">Z-axis label</label>
+          <input type="text" id="zTitle" placeholder="(automatic)">
+
+          <label class="fld">Axis label size — <span id="axisFontV">12</span></label>
+          <input type="range" id="axisFont" min="8" max="24" value="12">
+          <label class="fld">Tick number size — <span id="tickFontV">10</span></label>
+          <input type="range" id="tickFont" min="8" max="24" value="10">
+
+          <label class="chk" style="margin-top:12px;">
+            <input type="checkbox" id="zManualChk"> Set the Z-axis range by hand</label>
+          <div id="zRangeBox" style="display:none;" class="twocol">
+            <input type="number" id="zMin" step="any" placeholder="lowest">
+            <input type="number" id="zMax" step="any" placeholder="highest">
+          </div>
+
+          <label class="fld">Saved-image quality —
+            <span id="dlScaleV">1</span>×</label>
+          <input type="range" id="dlScale" min="1" max="6" step="1" value="1">
+        </div>
+      </details>
+      <details>
+        <summary>Compare two responses</summary>
+        <div class="dbody">
+          <label class="chk"><input type="checkbox" id="cmpChk">
+            Overlay a second response on the same chart</label>
+          <div id="cmpHint" class="hint" style="display:none;">
+            This dataset only has one response, so there is nothing to compare.</div>
+          <div id="cmpBox" style="display:none;">
+            <label class="fld">Second response</label>
+            <select id="cmpSel"></select>
+            <label class="fld">Its colour scheme</label>
+            <select id="cmpCsSel"></select>
+            <div class="hint">The second surface is drawn see-through, using the
+              same other-drug doses as the main surface.</div>
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <!-- ===== STAGE ===== -->
+  <div class="stage">
+    <div id="plot"></div>
+    <div class="plotbar" id="plotBar">
+      <span class="hint">Drag to rotate the surface · scroll to zoom in and out.</span>
+      <button id="savePng" class="ghost">Save image (PNG)</button>
+    </div>
+    <div class="card" id="infoCard" style="display:none;">
+      <h3>Surface fit</h3>
+      <div class="fitsum" id="fitLine"></div>
+      <div class="fitnote" id="fitNote"></div>
+      <details>
+        <summary>Show the fitted equation (advanced)</summary>
+        <div class="dbody" id="coefTable"></div>
+      </details>
+      <details>
+        <summary>Find the best dose combination</summary>
+        <div class="dbody">
+          <div class="optrow">
+            <select id="optObj" style="width:auto;">
+              <option value="max">Highest response</option>
+              <option value="min">Lowest response</option>
+            </select>
+            <button id="optRun">Find best combination</button>
+            <button id="optApply" class="ghost" style="display:none;">Use these doses</button>
+          </div>
+          <div class="optres" id="optRes"></div>
+          <div class="hint">Searches every drug across the dose ranges in your
+            data. The pink marker on the chart shows where the best point falls.</div>
+        </div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ====== injection point — Streamlit replaces the next line ====== */
+var INJECTED = null;
+/* ================================================================ */
+
+const IGNORE_PREFIXES = ["Cell_","Zebrafish_","Mouse_","Rat_","Patient_","Control_"];
+
+/* named colour schemes — mirrors the Plotting Tools tab. "Cool" is not a
+   built-in Plotly scale, so it is supplied as an explicit gradient. */
+const COOL_SCALE=[[0,"#00e5ff"],[1,"#ff2bd6"]];
+const CS_NAMES=["Viridis","Plasma","Jet","Cividis","Hot","Cool",
+  "Blues","Greens","RdBu","Greys"];
+function colorscaleOf(name){ return name==="Cool"?COOL_SCALE:name; }
+
+/* ---------- model: quadratic polynomial OLS ----------
+   y = a0 + Σ ai·xi + Σ bi·xi² + Σ cij·xi·xj
+   term order matches the Python tool (_build_poly_term_names). */
+function buildDesign(d){
+  const n=d.length, f=[1];
+  for(let i=0;i<n;i++) f.push(d[i]);
+  for(let i=0;i<n;i++) f.push(d[i]*d[i]);
+  for(let i=0;i<n;i++) for(let j=i+1;j<n;j++) f.push(d[i]*d[j]);
+  return f;
+}
+function paramNames(drugs){
+  const names=["Intercept"];
+  drugs.forEach(d=>names.push(d));
+  drugs.forEach(d=>names.push(d+"²"));
+  for(let i=0;i<drugs.length;i++)
+    for(let j=i+1;j<drugs.length;j++) names.push(drugs[i]+"×"+drugs[j]);
+  return names;
+}
+function solveLinear(A,b){
+  const p=b.length;
+  const M=A.map((r,i)=>r.concat([b[i]]));
+  for(let col=0;col<p;col++){
+    let piv=col;
+    for(let r=col+1;r<p;r++)
+      if(Math.abs(M[r][col])>Math.abs(M[piv][col])) piv=r;
+    if(Math.abs(M[piv][col])<1e-12) return null;
+    const tmp=M[col]; M[col]=M[piv]; M[piv]=tmp;
+    const dg=M[col][col];
+    for(let r=0;r<p;r++){
+      if(r===col) continue;
+      const factor=M[r][col]/dg;
+      for(let c=col;c<=p;c++) M[r][c]-=factor*M[col][c];
+    }
+  }
+  const x=new Array(p);
+  for(let i=0;i<p;i++) x[i]=M[i][p]/M[i][i];
+  return x;
+}
+/* fit: data = array of rows, each row [d0..dn-1, y] */
+function fitOLS(data,n){
+  const p=1+2*n+n*(n-1)/2;
+  const designs=[], ys=[];
+  for(const row of data){
+    const d=row.slice(0,n), y=row[n];
+    if(d.every(v=>isFinite(v))&&isFinite(y)){ designs.push(buildDesign(d)); ys.push(y); }
+  }
+  const m=designs.length;
+  if(m<p) return {error:"This dataset is too small to fit a surface. A "+
+    "quadratic model for "+n+" drugs needs at least "+p+" data points, but "+
+    "only "+m+" usable rows were found. Add more dose combinations and try again."};
+  const XtX=Array.from({length:p},()=>new Array(p).fill(0));
+  const Xty=new Array(p).fill(0);
+  for(let k=0;k<m;k++){
+    const f=designs[k], y=ys[k];
+    for(let i=0;i<p;i++){
+      Xty[i]+=f[i]*y;
+      for(let j=0;j<p;j++) XtX[i][j]+=f[i]*f[j];
+    }
+  }
+  const coef=solveLinear(XtX,Xty);
+  if(!coef) return {error:"A surface could not be fitted to this data. Two or "+
+    "more drugs appear to change together in lock-step, so the model cannot "+
+    "tell their effects apart. Use data where each drug is dosed independently."};
+  let ssr=0,sst=0; const ym=ys.reduce((a,b)=>a+b,0)/m;
+  for(let k=0;k<m;k++){
+    let pr=0; for(let i=0;i<p;i++) pr+=coef[i]*designs[k][i];
+    ssr+=(ys[k]-pr)*(ys[k]-pr); sst+=(ys[k]-ym)*(ys[k]-ym);
+  }
+  return {coef:coef,r2:(sst>0?1-ssr/sst:NaN),n:n,p:p,m:m,ssr:ssr};
+}
+function predict(coef,d){
+  const f=buildDesign(d);
+  let y=0; for(let i=0;i<f.length;i++) y+=coef[i]*f[i];
+  return y;
+}
+
+/* ---------- CSV parsing ---------- */
+function parseCSV(text){
+  const lines=text.replace(/\r/g,"").split("\n").filter(l=>l.trim().length>0);
+  if(lines.length<2) throw new Error("the file has no data rows.");
+  const headers=lines[0].split(",").map(s=>s.trim());
+  let raw=lines.slice(1).map(l=>l.split(",").map(s=>s.trim()));
+  // a description row (first data row with any non-numeric cell) supplies
+  // friendly display names; drop it from the data but keep it as labels
+  const isNum=s=>s!==""&&isFinite(Number(s));
+  let labels=null;
+  if(raw.length>1 && raw[0].some(c=>!isNum(c))){
+    labels={};
+    headers.forEach((h,i)=>{ if(raw[0][i]) labels[h]=raw[0][i]; });
+    raw=raw.slice(1);
+  }
+  const rows=raw.map(r=>r.map(c=>Number(c)));
+  return {headers:headers,rows:rows,labels:labels};
+}
+/* classify columns the way the Python tool does */
+function classify(headers){
+  const isDrug=h=>/^[A-Za-z]/.test(h)&&!IGNORE_PREFIXES.some(p=>h.startsWith(p));
+  let indep=headers.filter(isDrug);
+  let dep=headers.filter(h=>IGNORE_PREFIXES.some(p=>h.startsWith(p)));
+  if(dep.length===0){            // fallback: last column is the response
+    dep=[headers[headers.length-1]];
+    indep=headers.filter(h=>h!==dep[0]);
+  }
+  return {indep:indep,dep:dep};
+}
+
+/* ---------- application state ---------- */
+const S={drugs:[],indep:[],resp:"",depOptions:[],data:[],bounds:[],fit:null,
+  xVar:0,yVar:1,fixed:{},showGrid:true,labels:{},allRows:[],allHeaders:[],
+  /* appearance (mirrors Plotting Tools 3D-Surface controls) */
+  colorscale:"Viridis",showData:true,showXGrid:true,showYGrid:true,
+  mainTitle:"",xTitle:"",yTitle:"",zTitle:"",
+  axisFont:12,tickFont:10,zManual:false,zMin:0,zMax:100,dlScale:1,
+  /* comparison overlay */
+  compare:false,resp2:"",colorscale2:"Greys",fit2:null};
+
+/* friendly display name for a column (from a CSV description row),
+   falling back to the raw header when none was supplied */
+function labelOf(name){ return (S.labels && S.labels[name]) || name; }
+
+function setMsg(id,text,cls){
+  const el=document.getElementById(id);
+  el.innerHTML = text ? '<div class="msg '+(cls||"info")+'">'+text+'</div>' : "";
+}
+
+/* load a {headers, rows} table + chosen response into state, then fit */
+function loadTable(headers,rows,labels){
+  S.allHeaders=headers; S.allRows=rows; S.labels=labels||{};
+  const cls=classify(headers);
+  S.depOptions=cls.dep;
+  S.indep=cls.indep;
+  S.resp = (S.depOptions.indexOf(S.resp)>=0) ? S.resp : cls.dep[0];
+  rebuildFromResponse();
+}
+/* assemble [d0..dn-1, y] rows for a given response column */
+function assembleData(resp){
+  const headers=S.allHeaders;
+  const drugIdx=S.drugs.map(d=>headers.indexOf(d));
+  const respIdx=headers.indexOf(resp);
+  if(respIdx<0||drugIdx.some(i=>i<0)) return [];
+  return S.allRows
+    .filter(r=>r.length>Math.max(respIdx,...drugIdx))
+    .map(r=>drugIdx.map(i=>r[i]).concat([r[respIdx]]));
+}
+function rebuildFromResponse(){
+  // drug columns = the independent columns only (never another response column)
+  S.drugs=S.indep.slice();
+  S.data=assembleData(S.resp);
+  // bounds
+  S.bounds=S.drugs.map((_,k)=>{
+    const col=S.data.map(r=>r[k]).filter(isFinite);
+    return col.length?[Math.min(...col),Math.max(...col)]:[0,1];
+  });
+  if(S.drugs.length<2){
+    S.fit={error:"This dataset has only "+S.drugs.length+" drug column"+
+      (S.drugs.length===1?"":"s")+". A 3-D surface needs at least 2 drugs."};
+  }else{
+    S.fit=fitOLS(S.data,S.drugs.length);
+  }
+  // default Z-range from the observed response column
+  const yc=S.data.map(r=>r[S.drugs.length]).filter(isFinite);
+  S.zMin=yc.length?Math.min(...yc):0;
+  S.zMax=yc.length?Math.max(...yc):100;
+  // default axes / fixed values
+  S.xVar=0; S.yVar=Math.min(1,S.drugs.length-1);
+  S.fixed={};
+  S.drugs.forEach((_,k)=>{ S.fixed[k]=(S.bounds[k][0]+S.bounds[k][1])/2; });
+  renderControls();
+  render();
+}
+
+/* ---------- controls ---------- */
+function fillSelect(sel,opts,value){
+  sel.innerHTML="";
+  opts.forEach((o,i)=>{
+    const op=document.createElement("option");
+    op.value=(typeof o==="object")?o.value:o;
+    op.textContent=(typeof o==="object")?o.label:o;
+    sel.appendChild(op);
+  });
+  if(value!==undefined) sel.value=value;
+}
+function renderControls(){
+  const has=S.drugs.length>=2;
+  document.getElementById("ctlCard").style.display = S.drugs.length?"block":"none";
+  document.getElementById("appCard").style.display = has?"block":"none";
+  if(!S.drugs.length) return;
+  fillSelect(document.getElementById("respSel"),
+    S.depOptions.map(d=>({value:d,label:labelOf(d)})),S.resp);
+  fillSelect(document.getElementById("xSel"),
+    S.drugs.map((d,i)=>({value:String(i),label:labelOf(d)})),String(S.xVar));
+  fillSelect(document.getElementById("ySel"),
+    S.drugs.map((d,i)=>({value:String(i),label:labelOf(d)})),String(S.yVar));
+  // colour-scheme pickers
+  fillSelect(document.getElementById("csSel"),CS_NAMES,S.colorscale);
+  fillSelect(document.getElementById("cmpCsSel"),CS_NAMES,S.colorscale2);
+  // comparison-response options (every response except the primary)
+  const others=S.depOptions.filter(d=>d!==S.resp);
+  if(others.indexOf(S.resp2)<0) S.resp2 = others.length?others[0]:"";
+  fillSelect(document.getElementById("cmpSel"),
+    others.map(d=>({value:d,label:labelOf(d)})),S.resp2);
+  document.getElementById("cmpHint").style.display = others.length?"none":"block";
+  document.getElementById("cmpBox").style.display =
+    (S.compare && others.length)?"block":"none";
+  // z-range inputs
+  document.getElementById("zMin").value=S.zMin;
+  document.getElementById("zMax").value=S.zMax;
+  buildSliders();
+}
+function buildSliders(){
+  const box=document.getElementById("sliderBox");
+  box.innerHTML="";
+  const others=S.drugs.map((_,k)=>k).filter(k=>k!==S.xVar&&k!==S.yVar);
+  if(!others.length){
+    box.innerHTML='<div class="hint">Only two drugs in this dataset, so there '+
+      'are no other doses to hold fixed.</div>';
+    return;
+  }
+  const head=document.createElement("label");
+  head.className="fld"; head.textContent="Hold the other drugs at";
+  box.appendChild(head);
+  const hint=document.createElement("div");
+  hint.className="hint"; hint.style.marginTop="0";
+  hint.textContent="Drag a slider — the surface updates instantly.";
+  box.appendChild(hint);
+  others.forEach(k=>{
+    const [lo,hi]=S.bounds[k];
+    const row=document.createElement("div");
+    row.className="slider-row";
+    row.innerHTML='<div class="top"><span class="nm">'+labelOf(S.drugs[k])+
+      '</span><span class="vv" id="sv'+k+'">'+fmt(S.fixed[k])+'</span></div>'+
+      '<input type="range" min="0" max="1000" value="'+
+      (hi>lo?Math.round((S.fixed[k]-lo)/(hi-lo)*1000):500)+'" id="sl'+k+'">'+
+      '<div class="ends"><span>'+fmt(lo)+'</span><span>'+fmt(hi)+'</span></div>';
+    box.appendChild(row);
+    row.querySelector("input").addEventListener("input",e=>{
+      const t=+e.target.value/1000;
+      S.fixed[k]=lo+t*(hi-lo);
+      document.getElementById("sv"+k).textContent=fmt(S.fixed[k]);
+      render();
+    });
+  });
+}
+function fmt(v){
+  if(!isFinite(v)) return "—";
+  const a=Math.abs(v);
+  if(a!==0&&(a<1e-3||a>=1e5)) return v.toExponential(2);
+  return (Math.round(v*1000)/1000).toString();
+}
+
+/* ---------- render plot + fit info ---------- */
+function render(){
+  const info=document.getElementById("infoCard");
+  const bar=document.getElementById("plotBar");
+  if(!S.fit||S.fit.error){
+    Plotly.purge("plot");
+    bar.style.display="none";
+    document.getElementById("plot").innerHTML=
+      '<div class="empty">'+
+      (S.fit?S.fit.error:"Load a dataset to fit and explore a response surface.")+
+      '</div>';
+    info.style.display = S.fit&&S.fit.error?"block":"none";
+    if(S.fit&&S.fit.error){
+      document.getElementById("fitLine").innerHTML=
+        '<span class="qbadge q-poor">Fit error</span>';
+      document.getElementById("fitNote").textContent="";
+      document.getElementById("coefTable").innerHTML="";
+    }
+    return;
+  }
+  info.style.display="block";
+  bar.style.display="flex";
+  drawFitInfo();
+  drawSurface();
+}
+function drawFitInfo(){
+  const f=S.fit, r2=f.r2;
+  let q,cls;
+  if(!isFinite(r2)||r2<0.5){q="Poor fit";cls="q-poor";}
+  else if(r2<0.75){q="Fair fit";cls="q-fair";}
+  else if(r2<0.9){q="Good fit";cls="q-good";}
+  else {q="Excellent fit";cls="q-great";}
+  document.getElementById("fitLine").innerHTML=
+    '<span class="qbadge '+cls+'">'+q+'</span>'+
+    '<span class="metric">R² <b>'+(isFinite(r2)?r2.toFixed(4):"n/a")+'</b></span>'+
+    '<span class="sep">·</span>'+
+    '<span class="metric"><b>'+f.n+'</b> drugs</span>'+
+    '<span class="sep">·</span>'+
+    '<span class="metric"><b>'+f.m+'</b> data points</span>';
+  let note="";
+  if(isFinite(r2)&&r2>=0&&r2<=1)
+    note="The fitted surface explains "+Math.round(r2*100)+
+      "% of the variation in your measured data.";
+  if(isFinite(r2)&&r2<0.5)
+    note+=" A low fit usually means the response is not well described by a "+
+      "smooth quadratic shape, or the data is noisy.";
+  document.getElementById("fitNote").textContent=note;
+  const names=paramNames(S.drugs.map(labelOf));
+  let html='<table><tr><th>Term</th><th class="num">Coefficient</th></tr>';
+  for(let i=0;i<names.length;i++)
+    html+='<tr><td>'+names[i]+'</td><td class="num">'+
+      f.coef[i].toPrecision(5)+'</td></tr>';
+  html+='</table>';
+  document.getElementById("coefTable").innerHTML=html;
+}
+/* evaluate a fitted surface on the current X/Y grid at the fixed-drug base */
+function gridZ(coef,xs,ys,xV,yV){
+  const base=S.drugs.map((_,k)=>S.fixed[k]||0);
+  const Z=[];
+  for(let j=0;j<ys.length;j++){
+    const row=[];
+    for(let i=0;i<xs.length;i++){
+      const d=base.slice(); d[xV]=xs[i]; d[yV]=ys[j];
+      row.push(predict(coef,d));
+    }
+    Z.push(row);
+  }
+  return Z;
+}
+function drawSurface(){
+  // clear any non-Plotly placeholder before the first real render
+  const plotDiv=document.getElementById("plot");
+  if(!plotDiv.classList.contains("js-plotly-plot")) plotDiv.innerHTML="";
+  // keep whatever viewing angle / zoom the user rotated the surface to, so a
+  // re-draw (slider move, option change, axis switch) does not snap the view
+  // back — and the saved PNG matches exactly what is on screen.
+  let savedCam=null;
+  const fl=plotDiv._fullLayout;
+  if(fl&&fl.scene&&fl.scene.camera) savedCam=fl.scene.camera;
+  const f=S.fit, xV=S.xVar, yV=S.yVar, n=S.drugs.length;
+  const NG=42;
+  const [xlo,xhi]=S.bounds[xV], [ylo,yhi]=S.bounds[yV];
+  const xs=[],ys=[];
+  for(let i=0;i<NG;i++){xs.push(xlo+(xhi-xlo)*i/(NG-1));ys.push(ylo+(yhi-ylo)*i/(NG-1));}
+
+  const wire=()=>({x:{show:true,color:"#3f4654",width:1},
+                   y:{show:true,color:"#3f4654",width:1}});
+  const contours={z:{show:true,usecolormap:true,project:{z:true}}};
+  if(S.showGrid){ const w=wire(); contours.x=w.x; contours.y=w.y; }
+
+  // ── trace 0: primary surface (always data[0]) ──
+  const data=[{
+    type:"surface",x:xs,y:ys,z:gridZ(f.coef,xs,ys,xV,yV),
+    colorscale:colorscaleOf(S.colorscale),
+    colorbar:{title:labelOf(S.resp),thickness:14},
+    contours:contours,name:labelOf(S.resp)
+  }];
+
+  // ── comparison surface (translucent overlay) ──
+  S.fit2=null;
+  if(S.compare && S.resp2 && S.resp2!==S.resp && n>=2){
+    const f2=fitOLS(assembleData(S.resp2),n);
+    S.fit2=f2;
+    if(!f2.error){
+      data.push({
+        type:"surface",x:xs,y:ys,z:gridZ(f2.coef,xs,ys,xV,yV),
+        colorscale:colorscaleOf(S.colorscale2),showscale:false,opacity:0.82,
+        contours:S.showGrid?wire():{z:{show:false}},
+        name:labelOf(S.resp2)
+      });
+    }
+  }
+
+  // ── measured data points ──
+  if(S.showData && S.data.length){
+    data.push({
+      type:"scatter3d",mode:"markers",
+      x:S.data.map(r=>r[xV]),y:S.data.map(r=>r[yV]),z:S.data.map(r=>r[n]),
+      marker:{size:3,color:"#111418",opacity:0.75},name:"observed",
+      hovertemplate:labelOf(S.drugs[xV])+" %{x:.3g}<br>"+
+        labelOf(S.drugs[yV])+" %{y:.3g}<br>"+
+        labelOf(S.resp)+" %{z:.3g}<extra>measured</extra>"
+    });
+  }
+
+  // ── optimum marker ──
+  if(S._optimum){
+    const o=S._optimum;
+    data.push({type:"scatter3d",mode:"markers",
+      x:[o.doses[xV]],y:[o.doses[yV]],z:[o.value],
+      marker:{size:6,color:"#db2777",symbol:"diamond"},
+      name:"optimum",
+      hovertemplate:"best point<br>"+labelOf(S.resp)+" %{z:.3f}<extra></extra>"});
+  }
+
+  // ── titles / fonts / ranges ──
+  const others=S.drugs.map((_,k)=>k).filter(k=>k!==xV&&k!==yV);
+  const fixTxt=others.length?
+    "  ·  fixed: "+others.map(k=>labelOf(S.drugs[k])+"="+fmt(S.fixed[k])).join(", "):"";
+  const autoMain=labelOf(S.drugs[xV])+" × "+labelOf(S.drugs[yV])+fixTxt;
+  const af={size:S.axisFont}, tf={size:S.tickFont};
+  const zaxis={title:{text:S.zTitle||labelOf(S.resp),font:af},tickfont:tf};
+  if(S.zManual && isFinite(S.zMin) && isFinite(S.zMax) && S.zMax>S.zMin)
+    zaxis.range=[S.zMin,S.zMax];
+
+  const scene={
+    /* uirevision also preserves real mouse-drag rotations across re-draws;
+       savedCam below makes the same hold for programmatic re-renders. */
+    uirevision:"keep",
+    xaxis:{title:{text:S.xTitle||labelOf(S.drugs[xV]),font:af},
+      tickfont:tf,showgrid:S.showXGrid},
+    yaxis:{title:{text:S.yTitle||labelOf(S.drugs[yV]),font:af},
+      tickfont:tf,showgrid:S.showYGrid},
+    zaxis:zaxis
+  };
+  if(savedCam) scene.camera=savedCam;
+
+  Plotly.react("plot",data,{
+    margin:{l:0,r:0,t:34,b:0},
+    title:{text:S.mainTitle||autoMain,font:{size:13}},
+    uirevision:"keep",
+    scene:scene,
+    showlegend:false
+  },{responsive:true,displaylogo:false,
+     toImageButtonOptions:{format:"png",scale:S.dlScale,
+       filename:"surface_"+labelOf(S.resp)}});
+}
+
+/* save the chart as a PNG at the angle/zoom currently on screen */
+function saveImage(){
+  if(!S.fit||S.fit.error) return;
+  Plotly.downloadImage("plot",{format:"png",scale:S.dlScale,
+    filename:"surface_"+labelOf(S.resp)});
+}
+
+/* ---------- optimum (grid search over data bounds) ---------- */
+function findOptimum(maximize){
+  const f=S.fit; if(!f||f.error) return null;
+  const n=S.drugs.length;
+  const steps = n<=2?40 : n===3?17 : 10;
+  let bestV=maximize?-Infinity:Infinity, bestD=null;
+  // coarse pass
+  const search=(ranges,steps)=>{
+    const total=Math.pow(steps,n);
+    for(let c=0;c<total;c++){
+      let cc=c; const d=[];
+      for(let k=0;k<n;k++){
+        const s=cc%steps; cc=Math.floor(cc/steps);
+        const [lo,hi]=ranges[k];
+        d.push(steps>1?lo+(hi-lo)*s/(steps-1):lo);
+      }
+      const v=predict(f.coef,d);
+      if((maximize&&v>bestV)||(!maximize&&v<bestV)){bestV=v;bestD=d;}
+    }
+  };
+  search(S.bounds,steps);
+  // refine around best
+  if(bestD){
+    const refined=S.bounds.map((b,k)=>{
+      const span=(b[1]-b[0])/steps;
+      return [Math.max(b[0],bestD[k]-span),Math.min(b[1],bestD[k]+span)];
+    });
+    search(refined,7);
+  }
+  return {doses:bestD,value:bestV};
+}
+
+/* ---------- wiring ---------- */
+function wire(){
+  document.getElementById("csvFile").addEventListener("change",e=>{
+    const file=e.target.files[0]; if(!file) return;
+    const rd=new FileReader();
+    rd.onload=()=>{
+      try{
+        const t=parseCSV(rd.result);
+        S.resp=""; S.resp2=""; S._optimum=null;
+        loadTable(t.headers,t.rows,t.labels);
+        setMsg("dataMsg","Loaded "+file.name+" — "+t.rows.length+
+          " rows, "+t.headers.length+" columns.","info");
+      }catch(err){
+        setMsg("dataMsg","That file could not be read: "+err.message,"err");
+      }
+    };
+    rd.readAsText(file);
+  });
+  document.getElementById("respSel").addEventListener("change",e=>{
+    S.resp=e.target.value; S._optimum=null; rebuildFromResponse();
+  });
+  document.getElementById("xSel").addEventListener("change",e=>{
+    S.xVar=+e.target.value;
+    if(S.xVar===S.yVar) S.yVar=S.drugs.findIndex((_,k)=>k!==S.xVar);
+    document.getElementById("ySel").value=String(S.yVar);
+    buildSliders(); render();
+  });
+  document.getElementById("ySel").addEventListener("change",e=>{
+    S.yVar=+e.target.value;
+    if(S.xVar===S.yVar) S.xVar=S.drugs.findIndex((_,k)=>k!==S.yVar);
+    document.getElementById("xSel").value=String(S.xVar);
+    buildSliders(); render();
+  });
+  document.getElementById("gridChk").addEventListener("change",e=>{
+    S.showGrid=e.target.checked; render();
+  });
+  // ── appearance ──
+  document.getElementById("csSel").addEventListener("change",e=>{
+    S.colorscale=e.target.value; render();
+  });
+  document.getElementById("dataChk").addEventListener("change",e=>{
+    S.showData=e.target.checked; render();
+  });
+  document.getElementById("xGridChk").addEventListener("change",e=>{
+    S.showXGrid=e.target.checked; render();
+  });
+  document.getElementById("yGridChk").addEventListener("change",e=>{
+    S.showYGrid=e.target.checked; render();
+  });
+  const titleBind=(id,key)=>document.getElementById(id)
+    .addEventListener("input",e=>{ S[key]=e.target.value; render(); });
+  titleBind("mainTitle","mainTitle"); titleBind("xTitle","xTitle");
+  titleBind("yTitle","yTitle"); titleBind("zTitle","zTitle");
+  document.getElementById("axisFont").addEventListener("input",e=>{
+    S.axisFont=+e.target.value;
+    document.getElementById("axisFontV").textContent=e.target.value; render();
+  });
+  document.getElementById("tickFont").addEventListener("input",e=>{
+    S.tickFont=+e.target.value;
+    document.getElementById("tickFontV").textContent=e.target.value; render();
+  });
+  document.getElementById("zManualChk").addEventListener("change",e=>{
+    S.zManual=e.target.checked;
+    document.getElementById("zRangeBox").style.display=
+      e.target.checked?"flex":"none";
+    render();
+  });
+  document.getElementById("zMin").addEventListener("input",e=>{
+    S.zMin=parseFloat(e.target.value); render();
+  });
+  document.getElementById("zMax").addEventListener("input",e=>{
+    S.zMax=parseFloat(e.target.value); render();
+  });
+  document.getElementById("dlScale").addEventListener("input",e=>{
+    S.dlScale=+e.target.value;
+    document.getElementById("dlScaleV").textContent=e.target.value; render();
+  });
+  // ── comparison overlay ──
+  document.getElementById("cmpChk").addEventListener("change",e=>{
+    S.compare=e.target.checked;
+    const others=S.depOptions.filter(d=>d!==S.resp);
+    document.getElementById("cmpBox").style.display=
+      (e.target.checked && others.length)?"block":"none";
+    render();
+  });
+  document.getElementById("cmpSel").addEventListener("change",e=>{
+    S.resp2=e.target.value; render();
+  });
+  document.getElementById("cmpCsSel").addEventListener("change",e=>{
+    S.colorscale2=e.target.value; render();
+  });
+  // ── save image ──
+  document.getElementById("savePng").addEventListener("click",saveImage);
+  // ── optimum ──
+  document.getElementById("optRun").addEventListener("click",()=>{
+    const maximize=document.getElementById("optObj").value==="max";
+    const o=findOptimum(maximize);
+    if(!o){ document.getElementById("optRes").textContent=
+      "No fitted surface is available yet."; return; }
+    S._optimum=o;
+    document.getElementById("optRes").innerHTML=
+      "Best "+labelOf(S.resp)+" = <b>"+o.value.toPrecision(5)+"</b><br>"+
+      S.drugs.map((d,k)=>labelOf(d)+" = "+fmt(o.doses[k])).join("<br>");
+    document.getElementById("optApply").style.display="inline-block";
+    render();
+  });
+  document.getElementById("optApply").addEventListener("click",()=>{
+    if(!S._optimum) return;
+    S.drugs.forEach((_,k)=>{ S.fixed[k]=S._optimum.doses[k]; });
+    buildSliders(); render();
+  });
+}
+
+/* ---------- init ---------- */
+function init(){
+  wire();
+  if(INJECTED&&INJECTED.headers&&INJECTED.rows&&INJECTED.rows.length){
+    document.getElementById("dataSource").innerHTML=
+      '<span class="badge">Project data</span> '+
+      INJECTED.rows.length+' measurements loaded from your analysis.';
+    document.getElementById("csvFile").style.display="none";
+    if(INJECTED.response) S.resp=INJECTED.response;
+    loadTable(INJECTED.headers,INJECTED.rows,INJECTED.labels);
+  }else{
+    document.getElementById("dataSource").textContent=
+      "Upload a drug-combination CSV file — one column per drug dose, plus a "+
+      "response (outcome) column.";
+    document.getElementById("plot").innerHTML=
+      '<div class="empty">Load a dataset to fit and explore a response surface.</div>';
+  }
+}
+init();
+</script>
+</body>
+</html>
