@@ -8,7 +8,7 @@ import io
 from datetime import datetime
 from zipfile import ZipFile
 from scipy.optimize import curve_fit
-from .models import OLSWrapper, SVRWrapper, RandomForestWrapper, NonlinearLSWrapper, RidgeWrapper
+from .models import OLSWrapper, SVRWrapper, RandomForestWrapper, NonlinearLSWrapper, RidgeWrapper, MechanisticWrapper
 from .helpers import _add_polynomial_terms, generate_prediction_grid
 
 
@@ -171,6 +171,14 @@ def run_analysis(dataframe, independent_vars, dependent_var, model_type, model_p
             log_transform=model_params.get('log_transform', False),
         )
         return ridge_wrapper
+
+    elif model_type in ('MuSyC (mechanistic)', 'BRAID (2-drug)'):
+        # Mechanistic 2-drug surface fitted via the `synergy` package. Bounded by
+        # construction (asymptotes), with synergy read from the fitted parameters.
+        kind = 'braid' if model_type.startswith('BRAID') else 'musyc'
+        wrapper = MechanisticWrapper(independent_vars, kind=kind)
+        wrapper.fit(dataframe, dependent_var)
+        return wrapper
 
     elif model_type == 'SVR':
         svr_wrapper = SVRWrapper(independent_vars)

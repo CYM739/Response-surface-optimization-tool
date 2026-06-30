@@ -558,6 +558,92 @@ class BRAIDWrapper:
         )
 
 
+class MechanisticWrapper:
+    """Mechanistic 2-drug response-surface model (MuSyC or BRAID), fitted to the
+    user's combination data via the `synergy` package.
+
+    Unlike the polynomial wrappers, the surface is bounded by construction (it
+    asymptotes between E0 and the combination's max effect), so it cannot
+    extrapolate to impossible values (e.g. viability < 0). Synergy is read
+    directly from the fitted parameters — MuSyC's alpha (potency) / gamma
+    (cooperativity), or BRAID's kappa — rather than from a difference-to-null.
+
+    Two drugs only. Implements the standard wrapper interface
+    (predict, get_summary, get_params_df, independent_vars, formula, r2_score).
+    """
+
+    def __init__(self, independent_vars, kind="musyc"):
+        ivs = list(independent_vars)
+        if len(ivs) != 2:
+            raise ValueError(
+                "Mechanistic surface models (MuSyC / BRAID) support exactly two "
+                f"drugs; got {len(ivs)}. Use OLS / Ridge / fitnlm for 1 or 3+ drugs."
+            )
+        self.independent_vars = ivs
+        self.kind = kind.lower()
+        self._drug1, self._drug2 = ivs
+        self.model = None
+        self.params = {}
+        self.r2_score = None
+        self._dependent_var = None
+        self.formula = f"{self.kind.upper()}({self._drug1}, {self._drug2})"
+
+    def fit(self, dataframe, dependent_var, **kwargs):
+        from synergy.combination import MuSyC, BRAID
+        d1 = dataframe[self._drug1].to_numpy(dtype=float)
+        d2 = dataframe[self._drug2].to_numpy(dtype=float)
+        E = dataframe[dependent_var].to_numpy(dtype=float)
+        self.model = MuSyC() if self.kind == "musyc" else BRAID()
+        self.model.fit(d1, d2, E)
+        self._dependent_var = dependent_var
+        try:
+            p = self.model.get_parameters()
+            self.params = dict(p) if hasattr(p, "items") else {f"p{i}": v for i, v in enumerate(p)}
+        except Exception:
+            self.params = {}
+        pred = np.asarray(self.model.E(d1, d2), dtype=float)
+        ss_res = float(np.sum((E - pred) ** 2))
+        ss_tot = float(np.sum((E - E.mean()) ** 2))
+        self.r2_score = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+
+    def predict(self, dataframe):
+        if self.model is None:
+            raise RuntimeError("MechanisticWrapper has not been fit yet.")
+        d1 = dataframe[self._drug1].to_numpy(dtype=float)
+        d2 = dataframe[self._drug2].to_numpy(dtype=float)
+        return np.asarray(self.model.E(d1, d2), dtype=float)
+
+    def get_params_df(self):
+        return pd.DataFrame({"Term": list(self.params.keys()),
+                             "Coefficient": [float(v) for v in self.params.values()]})
+
+    def _synergy_label(self):
+        p = self.params
+        if self.kind == "braid":
+            k = float(p.get("kappa", 0.0))
+            tag = "Synergistic" if k > 0.1 else "Antagonistic" if k < -0.1 else "Additive"
+            return f"kappa = {k:.3f} ({tag})"
+        a12, a21 = float(p.get("alpha12", 1.0)), float(p.get("alpha21", 1.0))
+        amean = 0.5 * (a12 + a21)
+        tag = "Synergistic" if amean > 1.1 else "Antagonistic" if amean < 0.9 else "Additive"
+        return f"alpha12 = {a12:.2f}, alpha21 = {a21:.2f} (potency synergy: {tag})"
+
+    def get_summary(self):
+        lines = [
+            f"{self.kind.upper()} mechanistic surface ({self._drug1} + {self._drug2})",
+            "-" * 48,
+            f"Dependent variable : {self._dependent_var}",
+            (f"R-squared          : {self.r2_score:.4f}"
+             if self.r2_score is not None else "R-squared          : N/A"),
+            f"Synergy            : {self._synergy_label()}",
+            "",
+            "Parameters",
+            "----------",
+            self.get_params_df().to_string(index=False, float_format=lambda v: f"{v: .4g}"),
+        ]
+        return "\n".join(lines)
+
+
 # ── Model capability flags ──────────────────────────────────────────────────────
 # Views gate themselves on these instead of isinstance() checks, so adding a new
 # model type only requires declaring its capabilities here.
@@ -590,3 +676,7 @@ RandomForestWrapper.SUPPORTS_OLS_INFERENCE = False
 BRAIDWrapper.IS_PARAMETRIC_POLYNOMIAL = False
 BRAIDWrapper.SUPPORTS_GRADIENT_OPT = True
 BRAIDWrapper.SUPPORTS_OLS_INFERENCE = False
+
+MechanisticWrapper.IS_PARAMETRIC_POLYNOMIAL = False   # not a polynomial -> no OLS diagnostics
+MechanisticWrapper.SUPPORTS_GRADIENT_OPT = True       # smooth, bounded surface
+MechanisticWrapper.SUPPORTS_OLS_INFERENCE = False

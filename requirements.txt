@@ -9,3 +9,4 @@ streamlit>=1.40.0
 scipy
 scikit-optimize
 seaborn
+synergy>=1.0

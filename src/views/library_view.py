@@ -270,8 +270,15 @@ def render():
         # --- Run New Analysis Section ---
         with st.expander("Run a New Analysis", expanded=True):
             analysis_name = st.text_input("Enter a unique name for this new analysis", f"Analysis Run {len(analysis_runs) + 1}")
-            model_type = st.selectbox("Select Regression Method", ["Polynomial OLS", "Nonlinear LS (fitnlm)", "Ridge Regression", "SVR", "Random Forest"])
+            model_type = st.selectbox("Select Regression Method", ["Polynomial OLS", "Nonlinear LS (fitnlm)", "Ridge Regression", "MuSyC (mechanistic)", "BRAID (2-drug)", "SVR", "Random Forest"])
             model_params = {}
+            if model_type in ('MuSyC (mechanistic)', 'BRAID (2-drug)'):
+                st.info(
+                    "Mechanistic 2-drug surface (Hill-based, via the `synergy` package). "
+                    "Bounded by construction — no out-of-range extrapolation — and reports "
+                    "synergy directly from the fit (MuSyC α / BRAID κ). "
+                    "**Requires exactly 2 independent variables (drugs).**"
+                )
             if model_type == 'Nonlinear LS (fitnlm)':
                 st.info(
                     "Levenberg-Marquardt fit of the same quadratic polynomial as OLS "
