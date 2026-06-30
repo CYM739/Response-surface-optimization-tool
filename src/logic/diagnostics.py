@@ -81,11 +81,28 @@ def perform_normality_test(residuals):
         
     return shapiro_stat, shapiro_p, test_name
 
-def perform_heteroscedasticity_test(residuals, ols_model_wrapper):
+def build_design_matrix(dataframe, independent_vars):
+    """Build the (uncentered) polynomial design matrix + constant from raw data.
+
+    Lets residual-based diagnostics (Breusch-Pagan) work for any polynomial
+    model, not just statsmodels OLS."""
+    df = dataframe.copy()
+    _add_polynomial_terms(df, independent_vars)
+    cols = list(independent_vars) + [c for c in df.columns if '_sq' in c or '*' in c]
+    cols = [c for c in cols if c in df.columns]
+    X = df[cols].apply(pd.to_numeric, errors='coerce').dropna()
+    return add_constant(X)
+
+
+def perform_heteroscedasticity_test(residuals, ols_model_wrapper=None, exog=None):
     """
     Performs Breusch-Pagan test for heteroscedasticity.
+
+    Pass `exog` (a design matrix from build_design_matrix) for non-OLS
+    polynomial models; otherwise the statsmodels exog from the OLS wrapper.
     """
-    exog = ols_model_wrapper.model.model.exog
+    if exog is None:
+        exog = ols_model_wrapper.model.model.exog
     lm, lm_p_value, fvalue, f_p_value = het_breuschpagan(residuals, exog)
     return lm_p_value
 

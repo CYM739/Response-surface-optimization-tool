@@ -556,3 +556,37 @@ class BRAIDWrapper:
             f"kappa: {kappa:.3f} ({label})\n"
             f"R²: {p.get('r2_braid', 'N/A')}\n"
         )
+
+
+# ── Model capability flags ──────────────────────────────────────────────────────
+# Views gate themselves on these instead of isinstance() checks, so adding a new
+# model type only requires declaring its capabilities here.
+#   IS_PARAMETRIC_POLYNOMIAL : quadratic-polynomial regression -> Diagnostics tab
+#                              (residual-based assumption tests apply)
+#   SUPPORTS_GRADIENT_OPT    : smooth surface -> standard (SciPy) Optimizer tab
+#                              (non-smooth models must use the AI/Bayesian optimizer)
+#   SUPPORTS_OLS_INFERENCE   : full statsmodels inference (p-values, bootstrap CIs,
+#                              downloadable reports, Drug Elimination scoring)
+OLSWrapper.IS_PARAMETRIC_POLYNOMIAL = True
+OLSWrapper.SUPPORTS_GRADIENT_OPT = True
+OLSWrapper.SUPPORTS_OLS_INFERENCE = True
+
+NonlinearLSWrapper.IS_PARAMETRIC_POLYNOMIAL = True
+NonlinearLSWrapper.SUPPORTS_GRADIENT_OPT = True
+NonlinearLSWrapper.SUPPORTS_OLS_INFERENCE = False
+
+RidgeWrapper.IS_PARAMETRIC_POLYNOMIAL = True
+RidgeWrapper.SUPPORTS_GRADIENT_OPT = True
+RidgeWrapper.SUPPORTS_OLS_INFERENCE = False
+
+SVRWrapper.IS_PARAMETRIC_POLYNOMIAL = False
+SVRWrapper.SUPPORTS_GRADIENT_OPT = True
+SVRWrapper.SUPPORTS_OLS_INFERENCE = False
+
+RandomForestWrapper.IS_PARAMETRIC_POLYNOMIAL = False
+RandomForestWrapper.SUPPORTS_GRADIENT_OPT = False
+RandomForestWrapper.SUPPORTS_OLS_INFERENCE = False
+
+BRAIDWrapper.IS_PARAMETRIC_POLYNOMIAL = False
+BRAIDWrapper.SUPPORTS_GRADIENT_OPT = True
+BRAIDWrapper.SUPPORTS_OLS_INFERENCE = False

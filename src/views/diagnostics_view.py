@@ -10,16 +10,16 @@ import io
 from docx import Document  # Required for Word report generation
 
 from logic.diagnostics import (
-    calculate_vif, 
-    perform_normality_test, 
+    calculate_vif,
+    perform_normality_test,
     perform_heteroscedasticity_test,
+    build_design_matrix,
     perform_autocorrelation_test,
     perform_kfold_cv,
     perform_bootstrap_analysis,
     generate_diagnostics_report,
     generate_full_project_report
 )
-from logic.models import OLSWrapper
 
 def apply_custom_layout(fig, height, width, title_size, axis_size, tick_size, 
                         show_grid=False, journal_style=False, legend_size=14,
@@ -164,7 +164,7 @@ def create_word_report(model_wrapper, model_name, dataframe, independent_vars):
     return buffer
 
 def render():
-    st.subheader("🔍 OLS Assumption & Uncertainty Diagnostics")
+    st.subheader("🔍 Regression Assumption & Uncertainty Diagnostics")
     st.info("Evaluate statistical assumptions (Normality, VIF) and predictive uncertainty.")
 
     if 'analysis_done' not in st.session_state or not st.session_state.analysis_done:
@@ -200,66 +200,82 @@ def render():
             }
         }
 
-    # Filter for OLS models only
+    # Diagnostics apply to parametric polynomial models (OLS / fitnlm / Ridge).
     wrapped_models = st.session_state.get('wrapped_models', {})
-    ols_models = {k: v for k, v in wrapped_models.items() if isinstance(v, OLSWrapper)}
-    
+    param_models = {k: v for k, v in wrapped_models.items()
+                    if getattr(v, 'IS_PARAMETRIC_POLYNOMIAL', False)}
+
     # Retrieve 'exp_df'
-    data_df = st.session_state.get('exp_df', None) 
+    data_df = st.session_state.get('exp_df', None)
     independent_vars = st.session_state.get('independent_vars', [])
-    
-    if not ols_models:
-        st.warning("⚠️ No OLS models found.")
+
+    if not param_models:
+        other = ", ".join(sorted({type(v).__name__.replace("Wrapper", "")
+                                  for v in wrapped_models.values()})) or "none"
+        st.info(
+            "📐 Regression diagnostics (VIF, residual normality, homoscedasticity, "
+            "independence) apply to **parametric polynomial** models — Polynomial OLS, "
+            "Nonlinear LS (fitnlm), or Ridge. Active model type(s): "
+            f"**{other}**. Re-run with a polynomial model, or use the Plotting / "
+            "Synergy tabs for this model type."
+        )
         return
 
     st.divider()
 
-    for model_name, model_wrapper in ols_models.items():
+    for model_name, model_wrapper in param_models.items():
         # Safe key prefix (strip chars that break Streamlit keys)
         mk = model_name.replace(" ", "_").replace("(", "").replace(")", "").replace("/", "_")
 
         with st.expander(f"📊 {model_name}", expanded=True):
 
-            # --- Report buttons ---
-            col_btn1, col_btn2, _ = st.columns([1, 1, 2])
-            with col_btn1:
-                if st.button("📄 TXT Report", key=f"txt_btn_{mk}"):
-                    with st.spinner("Generating text report..."):
-                        report_text = generate_diagnostics_report(
-                            model_wrapper,
-                            model_name=model_name,
-                            dataframe=data_df,
-                            independent_vars=independent_vars
-                        )
-                        st.download_button(
-                            label="Download TXT",
-                            data=report_text,
-                            file_name=f"diagnostics_report_{model_name}.txt",
-                            mime="text/plain",
-                            key=f"dl_txt_{mk}"
-                        )
-            with col_btn2:
-                if st.button("📝 Word Report", key=f"word_btn_{mk}"):
-                    with st.spinner("Generating Word report..."):
-                        docx_buffer = create_word_report(
-                            model_wrapper,
-                            model_name,
-                            data_df,
-                            independent_vars
-                        )
-                        st.download_button(
-                            label="Download DOCX",
-                            data=docx_buffer,
-                            file_name=f"diagnostics_report_{model_name}.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            key=f"dl_docx_{mk}"
-                        )
+            supports_inference = getattr(model_wrapper, 'SUPPORTS_OLS_INFERENCE', False)
 
-            # Extract model data
-            results = model_wrapper.model
-            residuals = results.resid
-            fitted_values = results.fittedvalues
-            y_actual = results.model.endog
+            # --- Report buttons (statsmodels-based; OLS only) ---
+            if supports_inference:
+                col_btn1, col_btn2, _ = st.columns([1, 1, 2])
+                with col_btn1:
+                    if st.button("📄 TXT Report", key=f"txt_btn_{mk}"):
+                        with st.spinner("Generating text report..."):
+                            report_text = generate_diagnostics_report(
+                                model_wrapper,
+                                model_name=model_name,
+                                dataframe=data_df,
+                                independent_vars=independent_vars
+                            )
+                            st.download_button(
+                                label="Download TXT",
+                                data=report_text,
+                                file_name=f"diagnostics_report_{model_name}.txt",
+                                mime="text/plain",
+                                key=f"dl_txt_{mk}"
+                            )
+                with col_btn2:
+                    if st.button("📝 Word Report", key=f"word_btn_{mk}"):
+                        with st.spinner("Generating Word report..."):
+                            docx_buffer = create_word_report(
+                                model_wrapper,
+                                model_name,
+                                data_df,
+                                independent_vars
+                            )
+                            st.download_button(
+                                label="Download DOCX",
+                                data=docx_buffer,
+                                file_name=f"diagnostics_report_{model_name}.docx",
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                key=f"dl_docx_{mk}"
+                            )
+            else:
+                st.caption("ℹ️ Downloadable reports are OLS-only; the interactive "
+                           "assumption tests below apply to this model.")
+
+            # Residuals / fitted values — computed generically so fitnlm and Ridge
+            # get the same assumption tests as OLS. model_name is the dependent
+            # variable; data_df is the analysed data.
+            y_actual = pd.to_numeric(data_df[model_name], errors='coerce').to_numpy(dtype=float)
+            fitted_values = np.asarray(model_wrapper.predict(data_df), dtype=float)
+            residuals = y_actual - fitted_values
 
             # --- Tabbed Interface for Diagnostics ---
             tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -348,14 +364,23 @@ def render():
             with tab3:
                 st.markdown("#### Homoscedasticity")
                 col1, col2 = st.columns([1, 2])
-                lm_p = perform_heteroscedasticity_test(residuals, model_wrapper)
+                try:
+                    _eff_vars = independent_vars if independent_vars else model_wrapper.independent_vars
+                    _exog = build_design_matrix(data_df, _eff_vars)
+                    lm_p = perform_heteroscedasticity_test(residuals, exog=_exog)
+                except Exception:
+                    lm_p = float('nan')
 
                 with col1:
-                    st.metric("Breusch-Pagan p-value", f"{lm_p:.4f}")
-                    if lm_p < 0.05:
-                        st.error("❌ Heteroscedasticity detected.")
+                    if np.isnan(lm_p):
+                        st.metric("Breusch-Pagan p-value", "N/A")
+                        st.info("Could not compute (design/residual mismatch).")
                     else:
-                        st.success("✅ Variance is constant.")
+                        st.metric("Breusch-Pagan p-value", f"{lm_p:.4f}")
+                        if lm_p < 0.05:
+                            st.error("❌ Heteroscedasticity detected.")
+                        else:
+                            st.success("✅ Variance is constant.")
 
                 with col2:
                     with st.expander("✏️ Customize Plot Labels"):
@@ -433,27 +458,35 @@ def render():
 
                 st.divider()
 
-                col_cv, col_boot = st.columns(2)
-                with col_cv:
-                    with st.container(border=True):
-                        st.markdown("#### 🔄 Cross-Validation (K-Fold)")
-                        k_folds = st.number_input("Number of Folds (K)", min_value=2, max_value=20, value=5, key=f"kfolds_{mk}")
-                        if st.button("Run K-Fold CV", key=f"run_cv_{mk}"):
-                            try:
-                                cv_res = perform_kfold_cv(model_wrapper, k=k_folds)
-                                st.write("##### Results:")
-                                st.metric("Avg RMSE", f"{cv_res['avg_rmse']:.4f}")
-                                st.metric("Avg R²", f"{cv_res['avg_r2']:.4f}")
-                            except Exception as e:
-                                st.error(f"CV Failed: {e}")
+                if not supports_inference:
+                    st.info(
+                        "🎲 K-Fold CV and Bootstrap coefficient CIs are available for "
+                        "**Polynomial OLS** only (they refit via statsmodels). The "
+                        "predicted-vs-observed plot above and the assumption tests apply "
+                        "to this model."
+                    )
+                else:
+                    col_cv, col_boot = st.columns(2)
+                    with col_cv:
+                        with st.container(border=True):
+                            st.markdown("#### 🔄 Cross-Validation (K-Fold)")
+                            k_folds = st.number_input("Number of Folds (K)", min_value=2, max_value=20, value=5, key=f"kfolds_{mk}")
+                            if st.button("Run K-Fold CV", key=f"run_cv_{mk}"):
+                                try:
+                                    cv_res = perform_kfold_cv(model_wrapper, k=k_folds)
+                                    st.write("##### Results:")
+                                    st.metric("Avg RMSE", f"{cv_res['avg_rmse']:.4f}")
+                                    st.metric("Avg R²", f"{cv_res['avg_r2']:.4f}")
+                                except Exception as e:
+                                    st.error(f"CV Failed: {e}")
 
-                with col_boot:
-                    with st.container(border=True):
-                        st.markdown("#### 🎲 Bootstrap Analysis")
-                        n_boot = st.number_input("Number of Resamples", min_value=10, max_value=1000, value=1000, key=f"nboot_{mk}")
-                        if st.button("Run Bootstrap", key=f"run_boot_{mk}"):
-                            try:
-                                boot_df = perform_bootstrap_analysis(model_wrapper, n_bootstraps=n_boot)
-                                st.dataframe(boot_df[['Term', 'Original', '95% CI Lower', '95% CI Upper', 'Stable?']].style.format({'Original': '{:.4f}', '95% CI Lower': '{:.4f}', '95% CI Upper': '{:.4f}'}), width="stretch", hide_index=True)
-                            except Exception as e:
-                                st.error(f"Bootstrap Failed: {e}")
+                    with col_boot:
+                        with st.container(border=True):
+                            st.markdown("#### 🎲 Bootstrap Analysis")
+                            n_boot = st.number_input("Number of Resamples", min_value=10, max_value=1000, value=1000, key=f"nboot_{mk}")
+                            if st.button("Run Bootstrap", key=f"run_boot_{mk}"):
+                                try:
+                                    boot_df = perform_bootstrap_analysis(model_wrapper, n_bootstraps=n_boot)
+                                    st.dataframe(boot_df[['Term', 'Original', '95% CI Lower', '95% CI Upper', 'Stable?']].style.format({'Original': '{:.4f}', '95% CI Lower': '{:.4f}', '95% CI Upper': '{:.4f}'}), width="stretch", hide_index=True)
+                                except Exception as e:
+                                    st.error(f"Bootstrap Failed: {e}")

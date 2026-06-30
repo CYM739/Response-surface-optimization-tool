@@ -1,6 +1,5 @@
 ﻿import streamlit as st
 import pandas as pd
-from logic.models import OLSWrapper
 from logic.drug_elimination import DrugEliminator
 
 def render():
@@ -14,12 +13,18 @@ def render():
         return
 
     ols_models = {
-        name: model for name, model in st.session_state.wrapped_models.items() 
-        if isinstance(model, OLSWrapper)
+        name: model for name, model in st.session_state.wrapped_models.items()
+        if getattr(model, 'SUPPORTS_OLS_INFERENCE', False)
     }
 
     if not ols_models:
-        st.warning("Only OLS models can be used for this scoring system, since it relies on linear coefficients. No OLS models were found.")
+        active = ", ".join(sorted({type(m).__name__.replace("Wrapper", "")
+                                   for m in st.session_state.wrapped_models.values()})) or "none"
+        st.info(
+            "🗑️ Drug Elimination scoring reads **Polynomial OLS** coefficients directly, "
+            f"so it needs an OLS model. Active model type(s): **{active}**. "
+            "Re-run the analysis with Polynomial OLS to use this tab."
+        )
         return
 
     model_names = list(ols_models.keys())
