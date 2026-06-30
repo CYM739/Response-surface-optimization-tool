@@ -5,7 +5,7 @@ import pytest
 
 from logic.models import (
     OLSWrapper, NonlinearLSWrapper, RidgeWrapper,
-    SVRWrapper, RandomForestWrapper, BRAIDWrapper,
+    SVRWrapper, RandomForestWrapper,
 )
 from logic.diagnostics import (
     build_design_matrix, perform_heteroscedasticity_test,
@@ -28,9 +28,6 @@ def test_capability_flags():
 
     assert not RandomForestWrapper.IS_PARAMETRIC_POLYNOMIAL
     assert not RandomForestWrapper.SUPPORTS_GRADIENT_OPT   # non-smooth -> AI optimizer only
-
-    assert not BRAIDWrapper.IS_PARAMETRIC_POLYNOMIAL
-    assert BRAIDWrapper.SUPPORTS_GRADIENT_OPT        # mechanistic surface is smooth
 
 
 def _toy(n=40, seed=0):

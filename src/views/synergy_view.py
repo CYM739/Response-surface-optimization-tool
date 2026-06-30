@@ -155,7 +155,7 @@ def render():
         if show_only_combos:
             viz_display = viz_display[viz_display['Analysis_Note'] != 'Single Agent / Control']
 
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["Distribution", "Scatter Plot", "🧊 3D Synergy Surface", "🔀 Cross-Model Comparison", "🧬 Null Surface (Δ)"])
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Distribution", "Scatter Plot", "🧊 3D Synergy Surface", "🔀 Cross-Model Comparison", "🧬 Null Surface (Δ)", "🔬 Mechanistic"])
 
         with tab1:
             fig_hist = px.histogram(
@@ -404,3 +404,41 @@ def render():
                         m1.metric("Mean Δ", f"{np.nanmean(delta):.2f}")
                         m2.metric("Min Δ (peak synergy)", f"{np.nanmin(delta):.2f}")
                         m3.metric("Synergistic area (Δ < 0)", f"{np.mean(delta < 0) * 100:.0f}%")
+
+        with tab6:
+            mech = {n: m for n, m in st.session_state.get('wrapped_models', {}).items()
+                    if getattr(m, 'IS_MECHANISTIC', False)}
+            if not mech:
+                st.info(
+                    "Parameter-based synergy appears here when you fit a **MuSyC** or "
+                    "**BRAID** model (Library → *Run a New Analysis* → choose MuSyC / BRAID). "
+                    "These read synergy **straight from the fitted surface** — α/β/γ (MuSyC) "
+                    "or κ (BRAID) — instead of subtracting a null."
+                )
+            else:
+                st.markdown(
+                    "Synergy read **directly from the fitted mechanistic surface** "
+                    "(no null subtraction). Conventions follow the `synergy` package: "
+                    "α / γ compare to 1, β / κ compare to 0."
+                )
+
+                def _color_verdict(v):
+                    return ('color: green; font-weight: bold' if v == 'Synergistic'
+                            else 'color: #c00; font-weight: bold' if v == 'Antagonistic'
+                            else 'color: gray')
+
+                for name, model in mech.items():
+                    r2 = model.r2_score if model.r2_score is not None else float('nan')
+                    with st.expander(f"🔬 {name} · {model.kind.upper()}  (R² = {r2:.3f})", expanded=True):
+                        metrics = model.synergy_metrics()
+                        mdf = pd.DataFrame(metrics)
+                        st.dataframe(
+                            mdf.style.map(_color_verdict, subset=['Verdict']).format(
+                                {'Value': '{:.3f}', 'Baseline': '{:.0f}'}),
+                            width="stretch", hide_index=True,
+                        )
+                        syn = [r['Parameter'].split(' ')[0] for r in metrics if r['Verdict'] == 'Synergistic']
+                        if syn:
+                            st.success(f"Synergistic on: **{', '.join(syn)}**")
+                        else:
+                            st.info("No clear synergy axis — mostly additive / antagonistic.")

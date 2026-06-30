@@ -512,52 +512,6 @@ class RandomForestWrapper:
         return summary
 
 
-class BRAIDWrapper:
-    """Wraps BRAID surface parameters into the same interface as OLS/SVR/RF wrappers."""
-
-    def __init__(self, params, drug1_name, drug2_name):
-        self.params = params  # dict with EC50_1, h1, EC50_2, h2, E0, Einf, kappa, ...
-        self.independent_vars = [drug1_name, drug2_name]
-        self.formula = f"BRAID({drug1_name}, {drug2_name})"
-        self._drug1 = drug1_name
-        self._drug2 = drug2_name
-
-    def predict(self, dataframe):
-        D1 = dataframe[self._drug1].values.astype(float)
-        D2 = dataframe[self._drug2].values.astype(float)
-        EC1, EC2 = self.params["EC50_1"], self.params["EC50_2"]
-        h1, h2 = self.params["h1"], self.params["h2"]
-        E0, Einf = self.params["E0"], self.params["Einf"]
-        kappa = self.params["kappa"]
-        with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
-            T1 = np.where(D1 > 0, np.clip((D1 / EC1) ** h1, 0, 1e6), 0.0)
-            T2 = np.where(D2 > 0, np.clip((D2 / EC2) ** h2, 0, 1e6), 0.0)
-            denom = np.clip(1.0 + T1 + T2 + kappa * T1 * T2, 1e-9, None)
-            V = Einf + (E0 - Einf) / denom
-        return V
-
-    def get_summary(self):
-        p = self.params
-        kappa = p["kappa"]
-        if kappa > 1:
-            label = "Synergistic"
-        elif kappa < -1:
-            label = "Antagonistic"
-        else:
-            label = "Additive"
-        return (
-            f"BRAID Surface Model\n"
-            f"-------------------\n"
-            f"Drugs: {self._drug1} + {self._drug2}\n"
-            f"Cell Line: {p.get('cell_line', 'N/A')}\n"
-            f"EC50_1: {p['EC50_1']:.4g}, h1: {p['h1']:.3f}\n"
-            f"EC50_2: {p['EC50_2']:.4g}, h2: {p['h2']:.3f}\n"
-            f"E0: {p['E0']:.1f}%, Einf: {p['Einf']:.1f}%\n"
-            f"kappa: {kappa:.3f} ({label})\n"
-            f"R²: {p.get('r2_braid', 'N/A')}\n"
-        )
-
-
 class MechanisticWrapper:
     """Mechanistic 2-drug response-surface model (MuSyC or BRAID), fitted to the
     user's combination data via the `synergy` package.
@@ -643,6 +597,41 @@ class MechanisticWrapper:
         ]
         return "\n".join(lines)
 
+    def synergy_metrics(self):
+        """Native synergy readout from the fitted surface (`synergy`-package
+        conventions). Returns rows {Parameter, Value, Baseline, Verdict}.
+
+        MuSyC: beta (efficacy, vs 0), alpha12/alpha21 (potency, vs 1),
+        gamma12/gamma21 (cooperativity, vs 1). BRAID: kappa (vs 0).
+        """
+        def verdict(v, base, tol):
+            if not np.isfinite(v):
+                return "n/a"
+            if v > base + tol:
+                return "Synergistic"
+            if v < base - tol:
+                return "Antagonistic"
+            return "Additive"
+
+        rows = []
+        p = self.params
+        if self.kind == "braid":
+            k = float(p.get("kappa", 0.0))
+            rows.append({"Parameter": "kappa (interaction)", "Value": k,
+                         "Baseline": 0.0, "Verdict": verdict(k, 0.0, 0.1)})
+        else:
+            beta = float(getattr(self.model, "beta", float("nan")))
+            rows.append({"Parameter": "beta (efficacy)", "Value": beta,
+                         "Baseline": 0.0, "Verdict": verdict(beta, 0.0, 0.05)})
+            for key, lab in (("alpha12", "alpha12 (potency)"),
+                             ("alpha21", "alpha21 (potency)"),
+                             ("gamma12", "gamma12 (cooperativity)"),
+                             ("gamma21", "gamma21 (cooperativity)")):
+                v = float(p.get(key, 1.0))
+                rows.append({"Parameter": lab, "Value": v,
+                             "Baseline": 1.0, "Verdict": verdict(v, 1.0, 0.1)})
+        return rows
+
 
 # ── Model capability flags ──────────────────────────────────────────────────────
 # Views gate themselves on these instead of isinstance() checks, so adding a new
@@ -673,10 +662,7 @@ RandomForestWrapper.IS_PARAMETRIC_POLYNOMIAL = False
 RandomForestWrapper.SUPPORTS_GRADIENT_OPT = False
 RandomForestWrapper.SUPPORTS_OLS_INFERENCE = False
 
-BRAIDWrapper.IS_PARAMETRIC_POLYNOMIAL = False
-BRAIDWrapper.SUPPORTS_GRADIENT_OPT = True
-BRAIDWrapper.SUPPORTS_OLS_INFERENCE = False
-
 MechanisticWrapper.IS_PARAMETRIC_POLYNOMIAL = False   # not a polynomial -> no OLS diagnostics
 MechanisticWrapper.SUPPORTS_GRADIENT_OPT = True       # smooth, bounded surface
 MechanisticWrapper.SUPPORTS_OLS_INFERENCE = False
+MechanisticWrapper.IS_MECHANISTIC = True              # fitted synergy params (alpha/beta/gamma/kappa)

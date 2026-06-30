@@ -60,3 +60,16 @@ def test_fits_bounded_surface_and_reads_synergy(model_type, kind):
     else:
         assert float(w.params["kappa"]) > 0.0
     assert "Synergistic" in w.get_summary()
+
+
+def test_synergy_metrics_and_flag():
+    df = _synergy_df()
+    w = run_analysis(df, ["DrugA", "DrugB"], "Cell_Viability", "MuSyC (mechanistic)")
+    assert getattr(w, "IS_MECHANISTIC", False)
+    rows = w.synergy_metrics()
+    assert all(set(r) == {"Parameter", "Value", "Baseline", "Verdict"} for r in rows)
+    # potency synergy (alpha > 1) for this kappa>1 data
+    assert any(r["Parameter"].startswith("alpha") and r["Verdict"] == "Synergistic" for r in rows)
+
+    wb = run_analysis(df, ["DrugA", "DrugB"], "Cell_Viability", "BRAID (2-drug)")
+    assert any(r["Parameter"].startswith("kappa") for r in wb.synergy_metrics())
