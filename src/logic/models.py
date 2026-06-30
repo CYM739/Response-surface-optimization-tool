@@ -513,49 +513,67 @@ class RandomForestWrapper:
 
 
 class MechanisticWrapper:
-    """Mechanistic 2-drug response-surface model (MuSyC or BRAID), fitted to the
-    user's combination data via the `synergy` package.
+    """Mechanistic response-surface model (MuSyC or BRAID) fitted to the user's
+    combination data via the `synergy` package.
 
     Unlike the polynomial wrappers, the surface is bounded by construction (it
     asymptotes between E0 and the combination's max effect), so it cannot
     extrapolate to impossible values (e.g. viability < 0). Synergy is read
-    directly from the fitted parameters — MuSyC's alpha (potency) / gamma
-    (cooperativity), or BRAID's kappa — rather than from a difference-to-null.
+    directly from the fitted parameters — MuSyC alpha (potency) / beta
+    (efficacy) / gamma (cooperativity), or BRAID kappa — not a difference-to-null.
 
-    Two drugs only. Implements the standard wrapper interface
-    (predict, get_summary, get_params_df, independent_vars, formula, r2_score).
+    MuSyC supports 2+ drugs (2-drug via synergy.combination, 3+ via
+    synergy.higher); BRAID is 2-drug only. Implements the standard wrapper
+    interface (predict, get_summary, get_params_df, independent_vars, formula,
+    r2_score).
     """
 
     def __init__(self, independent_vars, kind="musyc"):
         ivs = list(independent_vars)
-        if len(ivs) != 2:
+        self.kind = kind.lower()
+        if len(ivs) < 2:
+            raise ValueError("Mechanistic surface models need at least 2 drugs.")
+        if self.kind == "braid" and len(ivs) != 2:
             raise ValueError(
-                "Mechanistic surface models (MuSyC / BRAID) support exactly two "
-                f"drugs; got {len(ivs)}. Use OLS / Ridge / fitnlm for 1 or 3+ drugs."
+                "BRAID supports exactly 2 drugs; use MuSyC for 3+ drugs (or OLS / Ridge)."
             )
         self.independent_vars = ivs
-        self.kind = kind.lower()
-        self._drug1, self._drug2 = ivs
+        self.n_drugs = len(ivs)
         self.model = None
         self.params = {}
         self.r2_score = None
         self._dependent_var = None
-        self.formula = f"{self.kind.upper()}({self._drug1}, {self._drug2})"
+        self.formula = f"{self.kind.upper()}({', '.join(ivs)})"
+
+    def _dose_matrix(self, dataframe):
+        return dataframe[self.independent_vars].to_numpy(dtype=float)
 
     def fit(self, dataframe, dependent_var, **kwargs):
-        from synergy.combination import MuSyC, BRAID
-        d1 = dataframe[self._drug1].to_numpy(dtype=float)
-        d2 = dataframe[self._drug2].to_numpy(dtype=float)
         E = dataframe[dependent_var].to_numpy(dtype=float)
-        self.model = MuSyC() if self.kind == "musyc" else BRAID()
-        self.model.fit(d1, d2, E)
+        if self.kind == "braid":
+            from synergy.combination import BRAID
+            self.model = BRAID()
+            d1 = dataframe[self.independent_vars[0]].to_numpy(dtype=float)
+            d2 = dataframe[self.independent_vars[1]].to_numpy(dtype=float)
+            self.model.fit(d1, d2, E)
+        elif self.n_drugs == 2:
+            from synergy.combination import MuSyC
+            self.model = MuSyC()
+            d1 = dataframe[self.independent_vars[0]].to_numpy(dtype=float)
+            d2 = dataframe[self.independent_vars[1]].to_numpy(dtype=float)
+            self.model.fit(d1, d2, E)
+        else:
+            from synergy.higher.musyc import MuSyC as MuSyCN
+            self.model = MuSyCN(num_drugs=self.n_drugs)
+            self.model.fit(self._dose_matrix(dataframe), E)
+
         self._dependent_var = dependent_var
         try:
             p = self.model.get_parameters()
             self.params = dict(p) if hasattr(p, "items") else {f"p{i}": v for i, v in enumerate(p)}
         except Exception:
             self.params = {}
-        pred = np.asarray(self.model.E(d1, d2), dtype=float)
+        pred = np.asarray(self.predict(dataframe), dtype=float)
         ss_res = float(np.sum((E - pred) ** 2))
         ss_tot = float(np.sum((E - E.mean()) ** 2))
         self.r2_score = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
@@ -563,28 +581,70 @@ class MechanisticWrapper:
     def predict(self, dataframe):
         if self.model is None:
             raise RuntimeError("MechanisticWrapper has not been fit yet.")
-        d1 = dataframe[self._drug1].to_numpy(dtype=float)
-        d2 = dataframe[self._drug2].to_numpy(dtype=float)
-        return np.asarray(self.model.E(d1, d2), dtype=float)
+        if self.kind == "braid" or self.n_drugs == 2:
+            d1 = dataframe[self.independent_vars[0]].to_numpy(dtype=float)
+            d2 = dataframe[self.independent_vars[1]].to_numpy(dtype=float)
+            return np.asarray(self.model.E(d1, d2), dtype=float)
+        return np.asarray(self.model.E(self._dose_matrix(dataframe)), dtype=float)
 
     def get_params_df(self):
         return pd.DataFrame({"Term": list(self.params.keys()),
                              "Coefficient": [float(v) for v in self.params.values()]})
 
-    def _synergy_label(self):
-        p = self.params
+    def synergy_metrics(self):
+        """Native synergy readout from the fitted surface (`synergy`-package
+        conventions). Returns rows {Parameter, Value, Baseline, Verdict}.
+
+        MuSyC: pairwise alpha (potency, vs 1), gamma (cooperativity, vs 1),
+        beta (efficacy, vs 0). BRAID: kappa (vs 0). Higher-order (subset) alpha
+        terms are omitted — usually unidentifiable.
+        """
+        def verdict(v, base, tol):
+            if not np.isfinite(v):
+                return "n/a"
+            if v > base + tol:
+                return "Synergistic"
+            if v < base - tol:
+                return "Antagonistic"
+            return "Additive"
+
         if self.kind == "braid":
-            k = float(p.get("kappa", 0.0))
-            tag = "Synergistic" if k > 0.1 else "Antagonistic" if k < -0.1 else "Additive"
-            return f"kappa = {k:.3f} ({tag})"
-        a12, a21 = float(p.get("alpha12", 1.0)), float(p.get("alpha21", 1.0))
-        amean = 0.5 * (a12 + a21)
-        tag = "Synergistic" if amean > 1.1 else "Antagonistic" if amean < 0.9 else "Additive"
-        return f"alpha12 = {a12:.2f}, alpha21 = {a21:.2f} (potency synergy: {tag})"
+            k = float(self.params.get("kappa", 0.0))
+            return [{"Parameter": "kappa", "Value": k,
+                     "Baseline": 0.0, "Verdict": verdict(k, 0.0, 0.1)}]
+
+        rows = []
+        # MuSyC potency (alpha) / cooperativity (gamma): vs 1. Pairwise only
+        # (skip comma'd higher-order subset terms, usually unidentifiable).
+        for key, v in self.params.items():
+            if (key.startswith("alpha") or key.startswith("gamma")) and "," not in key:
+                fv = float(v)
+                rows.append({"Parameter": key, "Value": fv,
+                             "Baseline": 1.0, "Verdict": verdict(fv, 1.0, 0.1)})
+        # MuSyC efficacy (beta): vs 0. Scalar (2-drug) or dict (n-drug).
+        beta = getattr(self.model, "beta", None)
+        if isinstance(beta, dict):
+            for bk, bv in beta.items():
+                rows.append({"Parameter": f"beta_{bk}", "Value": float(bv),
+                             "Baseline": 0.0, "Verdict": verdict(float(bv), 0.0, 0.05)})
+        elif beta is not None:
+            try:
+                fv = float(beta)
+                rows.append({"Parameter": "beta", "Value": fv,
+                             "Baseline": 0.0, "Verdict": verdict(fv, 0.0, 0.05)})
+            except (TypeError, ValueError):
+                pass
+        return rows
+
+    def _synergy_label(self):
+        rows = self.synergy_metrics()
+        syn = sum(1 for r in rows if r["Verdict"] == "Synergistic")
+        ant = sum(1 for r in rows if r["Verdict"] == "Antagonistic")
+        return f"{syn} synergistic / {ant} antagonistic of {len(rows)} interaction terms"
 
     def get_summary(self):
         lines = [
-            f"{self.kind.upper()} mechanistic surface ({self._drug1} + {self._drug2})",
+            f"{self.kind.upper()} mechanistic surface ({' + '.join(self.independent_vars)})",
             "-" * 48,
             f"Dependent variable : {self._dependent_var}",
             (f"R-squared          : {self.r2_score:.4f}"
@@ -596,41 +656,6 @@ class MechanisticWrapper:
             self.get_params_df().to_string(index=False, float_format=lambda v: f"{v: .4g}"),
         ]
         return "\n".join(lines)
-
-    def synergy_metrics(self):
-        """Native synergy readout from the fitted surface (`synergy`-package
-        conventions). Returns rows {Parameter, Value, Baseline, Verdict}.
-
-        MuSyC: beta (efficacy, vs 0), alpha12/alpha21 (potency, vs 1),
-        gamma12/gamma21 (cooperativity, vs 1). BRAID: kappa (vs 0).
-        """
-        def verdict(v, base, tol):
-            if not np.isfinite(v):
-                return "n/a"
-            if v > base + tol:
-                return "Synergistic"
-            if v < base - tol:
-                return "Antagonistic"
-            return "Additive"
-
-        rows = []
-        p = self.params
-        if self.kind == "braid":
-            k = float(p.get("kappa", 0.0))
-            rows.append({"Parameter": "kappa (interaction)", "Value": k,
-                         "Baseline": 0.0, "Verdict": verdict(k, 0.0, 0.1)})
-        else:
-            beta = float(getattr(self.model, "beta", float("nan")))
-            rows.append({"Parameter": "beta (efficacy)", "Value": beta,
-                         "Baseline": 0.0, "Verdict": verdict(beta, 0.0, 0.05)})
-            for key, lab in (("alpha12", "alpha12 (potency)"),
-                             ("alpha21", "alpha21 (potency)"),
-                             ("gamma12", "gamma12 (cooperativity)"),
-                             ("gamma21", "gamma21 (cooperativity)")):
-                v = float(p.get(key, 1.0))
-                rows.append({"Parameter": lab, "Value": v,
-                             "Baseline": 1.0, "Verdict": verdict(v, 1.0, 0.1)})
-        return rows
 
 
 # ── Model capability flags ──────────────────────────────────────────────────────

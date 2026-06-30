@@ -274,10 +274,10 @@ def render():
             model_params = {}
             if model_type in ('MuSyC (mechanistic)', 'BRAID (2-drug)'):
                 st.info(
-                    "Mechanistic 2-drug surface (Hill-based, via the `synergy` package). "
+                    "Mechanistic Hill-based surface (via the `synergy` package). "
                     "Bounded by construction — no out-of-range extrapolation — and reports "
-                    "synergy directly from the fit (MuSyC α / BRAID κ). "
-                    "**Requires exactly 2 independent variables (drugs).**"
+                    "synergy directly from the fit (MuSyC α/β/γ, BRAID κ). "
+                    "**MuSyC supports 2+ drugs; BRAID is 2-drug only.**"
                 )
             if model_type == 'Nonlinear LS (fitnlm)':
                 st.info(

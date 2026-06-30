@@ -29,11 +29,15 @@ def test_capability_flags():
     assert not MechanisticWrapper.SUPPORTS_OLS_INFERENCE
 
 
-def test_requires_exactly_two_drugs():
+def test_drug_count_guards():
+    # MuSyC supports 3+ drugs (no raise on construction)
+    MechanisticWrapper(["A", "B", "C"], kind="musyc")
+    # BRAID is 2-drug only
     with pytest.raises(ValueError):
-        MechanisticWrapper(["A", "B", "C"], kind="musyc")
+        MechanisticWrapper(["A", "B", "C"], kind="braid")
+    # need at least 2 drugs
     with pytest.raises(ValueError):
-        MechanisticWrapper(["A"], kind="braid")
+        MechanisticWrapper(["A"], kind="musyc")
 
 
 @pytest.mark.parametrize("model_type,kind", [
@@ -59,7 +63,7 @@ def test_fits_bounded_surface_and_reads_synergy(model_type, kind):
         assert amean > 1.0
     else:
         assert float(w.params["kappa"]) > 0.0
-    assert "Synergistic" in w.get_summary()
+    assert any(r["Verdict"] == "Synergistic" for r in w.synergy_metrics())
 
 
 def test_synergy_metrics_and_flag():
@@ -73,3 +77,32 @@ def test_synergy_metrics_and_flag():
 
     wb = run_analysis(df, ["DrugA", "DrugB"], "Cell_Viability", "BRAID (2-drug)")
     assert any(r["Parameter"].startswith("kappa") for r in wb.synergy_metrics())
+
+
+def _synergy_df_3drug(seed=0):
+    import itertools
+    rng = np.random.default_rng(seed)
+    E0, EC, h = 100.0, [8.0, 15.0, 20.0], [1.4, 1.1, 1.2]
+    levels = [[0, 2, 8, 32.0], [0, 4, 15, 60.0], [0, 5, 20, 80.0]]
+    rows = []
+    for combo in itertools.product(*levels):
+        T = [((dd / EC[i]) ** h[i] if dd > 0 else 0.0) for i, dd in enumerate(combo)]
+        surv = 1.0
+        for t in T:
+            surv *= 1.0 / (1.0 + t)
+        rows.append({"DrugA": combo[0], "DrugB": combo[1], "DrugC": combo[2],
+                     "Cell_Viability": float(np.clip(E0 * surv + rng.normal(0, 1.0), 0, 110))})
+    return pd.DataFrame(rows)
+
+
+def test_musyc_three_drug_fit_bounded():
+    df = _synergy_df_3drug()
+    w = run_analysis(df, ["DrugA", "DrugB", "DrugC"], "Cell_Viability", "MuSyC (mechanistic)")
+    assert isinstance(w, MechanisticWrapper)
+    assert w.n_drugs == 3
+    assert w.r2_score > 0.9
+    pred = np.asarray(w.predict(df), float)
+    assert pred.min() >= -2.0 and pred.max() <= 105.0       # bounded for 3 drugs too
+    rows = w.synergy_metrics()
+    assert any(r["Parameter"].startswith("alpha") for r in rows)   # pairwise potency
+    assert any(r["Parameter"].startswith("beta") for r in rows)    # efficacy
