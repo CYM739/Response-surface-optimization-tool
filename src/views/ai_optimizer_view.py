@@ -9,25 +9,30 @@ from logic.data_processing import generate_optimization_report
 from utils.ui_helpers import (format_variable_options, get_optimization_bounds_and_algo,
                               validate_bounds_for_ai, display_surface_plot)
 from utils.state_management import clear_optimizer_results
-def render():
-    """Renders all UI components and logic for the AI Optimizer tab."""
-    st.subheader("🤖 AI Optimizer (Bayesian Optimization)")
-    st.info("""
+def render(analysis_type=None, formatted_models=None):
+    """Renders the AI (Bayesian) optimizer.
+
+    When `analysis_type` / `formatted_models` are passed (from the merged
+    Optimization tab) the standalone header and analysis-type radio are skipped.
+    """
+    if analysis_type is None:
+        st.subheader("🤖 AI Optimizer (Bayesian Optimization)")
+        st.info("""
     This advanced optimizer uses a smart search strategy (Bayesian Optimization) to efficiently find the best possible outcomes.
     - **Optimize All Variables:** Finds the single best combination of all variables to meet your goal.
     - **Combination Analysis:** Systematically tests combinations of 2 or 3 variables to rank which groups of variables are the most impactful.
     """)
-    
-    bopt_analysis_type = st.radio(
-        "Select Analysis Type",
-        ("Optimize All Variables", "Combination Analysis"),
-        key="bopt_analysis_type",
-        horizontal=True,
-        on_change=clear_optimizer_results
-    )
-    st.write("---")
-    
-    formatted_models = format_variable_options(st.session_state.wrapped_models.keys())
+        analysis_type = st.radio(
+            "Select Analysis Type",
+            ("Optimize All Variables", "Combination Analysis"),
+            key="bopt_analysis_type",
+            horizontal=True,
+            on_change=clear_optimizer_results
+        )
+        st.write("---")
+
+    if formatted_models is None:
+        formatted_models = format_variable_options(st.session_state.wrapped_models.keys())
     if not formatted_models:
         st.info("Run an analysis from the 'Project Library' to use the AI Optimizer.")
         return
@@ -73,7 +78,7 @@ def render():
     bounds_bopt = None
     combo_size = None
     outcome_min_bopt = None
-    if bopt_analysis_type == "Optimize All Variables":
+    if analysis_type == "Optimize All Variables":
         bounds_bopt = get_optimization_bounds_and_algo("bopt")
     else: # Combination Analysis
         st.write("**Combination Settings**")
@@ -102,7 +107,7 @@ def render():
 
     if st.button("Run AI Optimization", type="primary"):
         run_ai_optimization(
-            bopt_analysis_type, model_to_optimize_bopt, goal_bopt, target_value_bopt,
+            analysis_type, model_to_optimize_bopt, goal_bopt, target_value_bopt,
             discrete_vars_bopt, bounds_bopt, combo_size, n_calls, n_initial_points,
             outcome_min_bopt
         )

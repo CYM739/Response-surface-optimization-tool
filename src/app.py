@@ -8,9 +8,8 @@ import json
 import sys
 if not hasattr(np, 'int'):
     np.int = int
-from views import library_view, plotting_view, optimizer_view, ai_optimizer_view, synergy_view, diagnostics_view, elimination_view
+from views import library_view, plotting_view, optimization_view, synergy_view, diagnostics_view, elimination_view
 from utils import state_management
-from logic.models import RandomForestWrapper
 
 def display_sidebar_info():
     """Displays information about the loaded project in the sidebar."""
@@ -64,15 +63,14 @@ def main():
         "📚 Project Library",
         "🧊 Plotting Tools",
         "🔍 Diagnostics",
-        "🎯 Optimizer",
-        "🤖 AI Optimizer",
+        "🎯 Optimization",
         "🤝 Synergy Analysis",
         "🗑️ Drug Elimination",
         "💾 Session State"
     ]
 
-    # Unpack 8 tabs
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(tab_list)
+    # Unpack 7 tabs
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(tab_list)
 
     with tab1:
         library_view.render()
@@ -92,38 +90,24 @@ def main():
 
     with tab4:
         if analysis_is_done:
-            active_model_is_rf = False
-            if st.session_state.get('wrapped_models'):
-                # Check if any of the active models is a Random Forest model
-                active_model_is_rf = any(isinstance(model, RandomForestWrapper) for model in st.session_state.wrapped_models.values())
-            
-            if active_model_is_rf:
-                st.warning("The standard Optimizer tab is not compatible with Random Forest models. Please use the AI Optimizer tab for optimization.", icon="⚠️")
-            else:
-                optimizer_view.render()
+            optimization_view.render()
         else:
             st.info("Load and analyze a project from the 'Project Library' to use the optimizer.")
 
     with tab5:
         if analysis_is_done:
-            ai_optimizer_view.render()
-        else:
-            st.info("Load and analyze a project from the 'Project Library' to use the AI optimizer.")
-            
-    with tab6:
-        if analysis_is_done:
             synergy_view.render()
         else:
             st.info("Load and analyze a project from the 'Project Library' to perform synergy analysis.")
-            
-    with tab7:
+
+    with tab6:
         if analysis_is_done:
             elimination_view.render()
         else:
             st.info("Load and analyze a project from the 'Project Library' to perform drug elimination scoring.")
 
     # Session State Tab
-    with tab8:
+    with tab7:
         render_session_state_tab()
 
 def render_session_state_tab():

@@ -38,8 +38,8 @@ def test_title_and_tabs_render_on_cold_boot():
     titles = [t.value for t in at.title]
     assert any("Response Surface" in t for t in titles)
 
-    # The app declares 8 tabs in app.py
-    assert len(at.tabs) == 8
+    # The app declares 7 tabs in app.py
+    assert len(at.tabs) == 7
 
 
 def test_optimizer_tab_guards_when_no_model_loaded():
@@ -99,8 +99,8 @@ def _seed_analyzed_project(at: AppTest, analyzed_demo: dict, trained_ols: dict):
 
 
 def test_app_renders_with_seeded_project(analyzed_demo, trained_ols):
-    """With a project pre-seeded, the Optimizer tab should now show the radio
-    button (Single vs Multi-Objective) instead of the guard banner."""
+    """With a project pre-seeded, the merged Optimization tab should show the
+    engine selector instead of the guard banner."""
     at = AppTest.from_file(APP_SCRIPT, default_timeout=BOOT_TIMEOUT)
     _seed_analyzed_project(at, analyzed_demo, trained_ols)
     at.run()
@@ -108,8 +108,8 @@ def test_app_renders_with_seeded_project(analyzed_demo, trained_ols):
     assert not at.exception, f"App raised with seeded state: {at.exception}"
 
     radio_labels = [r.label for r in at.radio]
-    assert any("Optimization Type" in label for label in radio_labels), (
-        f"Expected optimizer radio to be rendered. Found radios: {radio_labels}"
+    assert any("Optimization engine" in label for label in radio_labels), (
+        f"Expected optimization engine radio to be rendered. Found radios: {radio_labels}"
     )
 
 
