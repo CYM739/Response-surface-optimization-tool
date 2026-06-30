@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 from logic.data_processing import calculate_high_throughput_synergy
-from logic.plotting import calculate_synergy_surface_grid, plot_response_surface
+from logic.plotting import calculate_synergy_surface_grid, plot_response_surface, predict_surface
 from logic.null_surface import reference_surface
 from utils.ui_helpers import format_variable_options
 
@@ -341,9 +341,11 @@ def render():
                     max_d2 = st.session_state.exp_df[nd2].max()
                     fixed_vars = {d: 0.0 for d in st.session_state.independent_vars if d not in [nd1, nd2]}
                     with st.spinner("Computing null surface and Δ..."):
-                        x_g, y_g, z_g, _ = calculate_synergy_surface_grid(
-                            model=model_obj, drug1=nd1, drug2=nd2, fixed_vars=fixed_vars,
-                            range1=(0, max_d1), range2=(0, max_d2), method="bliss")
+                        # Raw viability model surface — same units as the null surface.
+                        # (NOT calculate_synergy_surface_grid, which clips to 0-1 inhibition.)
+                        x_g, y_g, z_g = predict_surface(
+                            model_obj, st.session_state.independent_vars,
+                            nd1, nd2, fixed_vars, (0, max_d1), (0, max_d2))
                         rows = [{**fixed_vars, nd1: float(x_g[i, j]), nd2: float(y_g[i, j])}
                                 for i in range(x_g.shape[0]) for j in range(x_g.shape[1])]
                         ref = reference_surface(nmethod.lower(), rows, usable).reshape(x_g.shape)
