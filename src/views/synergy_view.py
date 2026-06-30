@@ -5,7 +5,7 @@ import numpy as np
 import plotly.express as px
 from logic.data_processing import calculate_high_throughput_synergy
 from logic.plotting import calculate_synergy_surface_grid, plot_response_surface, predict_surface
-from logic.null_surface import reference_surface
+from logic.null_surface import reference_surface, shared_baseline
 from utils.ui_helpers import format_variable_options
 
 # Diverging colorscale for difference-to-neutral: green = synergy (Δ < 0),
@@ -349,8 +349,25 @@ def render():
                         rows = [{**fixed_vars, nd1: float(x_g[i, j]), nd2: float(y_g[i, j])}
                                 for i in range(x_g.shape[0]) for j in range(x_g.shape[1])]
                         ref = reference_surface(nmethod.lower(), rows, usable).reshape(x_g.shape)
-                        delta = z_g - ref
+
+                        # Clamp the model surface to the physical response range
+                        # [Einf, E0] (from the Hill baselines). A polynomial model can
+                        # extrapolate to impossible values (e.g. viability < 0), which
+                        # would falsely inflate synergy — clamp for both Δ and display.
+                        e0_bar, einf_bar = shared_baseline(usable)
+                        lo, hi = (einf_bar, e0_bar) if einf_bar <= e0_bar else (e0_bar, einf_bar)
+                        n_out = int(np.sum((z_g < lo) | (z_g > hi)))
+                        z_show = np.clip(z_g, lo, hi)
+                        delta = z_show - ref
                         cmax = float(np.nanmax(np.abs(delta))) or 1.0
+
+                        if n_out:
+                            st.caption(
+                                f"⚠️ The model surface extrapolated outside the physical range "
+                                f"[{lo:.0f}, {hi:.0f}] in {n_out / z_g.size * 100:.0f}% of the grid "
+                                f"— clamped for Δ and display. A bounded / mechanistic model "
+                                f"(Phase 2) avoids this."
+                            )
 
                         d1_desc = st.session_state.variable_descriptions.get(nd1, nd1)
                         d2_desc = st.session_state.variable_descriptions.get(nd2, nd2)
@@ -361,7 +378,7 @@ def render():
                             fixed_vars_dict_1=fixed_vars,
                             variable_descriptions=st.session_state.variable_descriptions,
                             show_actual_data=False,
-                            x_grid_override=x_g, y_grid_override=y_g, z_grid_override=z_g,
+                            x_grid_override=x_g, y_grid_override=y_g, z_grid_override=z_show,
                             surfacecolor=delta, surfacecolor_colorscale=_DELTA_COLORSCALE,
                             surfacecolor_cmin=-cmax, surfacecolor_cmax=cmax,
                             surfacecolor_label=f"Δ vs {nmethod} (green = synergy)",
