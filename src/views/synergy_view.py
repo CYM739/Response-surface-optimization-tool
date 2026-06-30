@@ -5,7 +5,16 @@ import numpy as np
 import plotly.express as px
 from logic.data_processing import calculate_high_throughput_synergy
 from logic.plotting import calculate_synergy_surface_grid, plot_response_surface
+from logic.null_surface import reference_surface
 from utils.ui_helpers import format_variable_options
+
+# Diverging colorscale for difference-to-neutral: green = synergy (Δ < 0),
+# near-white = additive (Δ ≈ 0), red = antagonism (Δ > 0).
+_DELTA_COLORSCALE = [
+    [0.0, "rgb(0,140,0)"],
+    [0.5, "rgb(245,245,245)"],
+    [1.0, "rgb(200,0,0)"],
+]
 
 def render():
     """Renders the Row-Based High-Throughput Synergy Analysis Tab."""
@@ -146,7 +155,7 @@ def render():
         if show_only_combos:
             viz_display = viz_display[viz_display['Analysis_Note'] != 'Single Agent / Control']
 
-        tab1, tab2, tab3, tab4 = st.tabs(["Distribution", "Scatter Plot", "🧊 3D Synergy Surface", "🔀 Cross-Model Comparison"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["Distribution", "Scatter Plot", "🧊 3D Synergy Surface", "🔀 Cross-Model Comparison", "🧬 Null Surface (Δ)"])
 
         with tab1:
             fig_hist = px.histogram(
@@ -295,3 +304,84 @@ def render():
                         if not consistent_ant.empty:
                             st.markdown("**Consistently Antagonistic Combinations:**")
                             st.dataframe(consistent_ant.style.format("{:.2f}"), width="stretch")
+
+        with tab5:
+            st.markdown(
+                "**Difference-to-Neutral:** the model surface vs the non-interaction *null* "
+                "(Bliss / HSA / Loewe) built from monotherapy Hill fits. "
+                "Color = Δ (model − null); for viability, **Δ < 0 = synergy** "
+                "(combination kills more than the null predicts)."
+            )
+
+            hill_all = st.session_state.get('hill_fits') or {}
+            hf = hill_all.get(viz_effect_col)
+            usable = {d: f for d, f in hf.items() if d in active_drugs} if hf else {}
+
+            if len(usable) < 2:
+                st.info(
+                    "Needs fitted monotherapy Hill curves for ≥2 drugs in this response. "
+                    "Add single-drug rows (one drug varied, the others at 0) so the marginals "
+                    "can be fit — none were detected for this model."
+                )
+            else:
+                drugs_with_fit = list(usable.keys())
+                c1, c2, c3 = st.columns(3)
+                nd1 = c1.selectbox("X-Axis Drug", drugs_with_fit, index=0, key="null_d1")
+                nd2 = c2.selectbox("Y-Axis Drug", drugs_with_fit,
+                                   index=1 if len(drugs_with_fit) > 1 else 0, key="null_d2")
+                nmethod = c3.radio("Null model", ["Bliss", "HSA", "Loewe"], index=0, key="null_method")
+
+                model_obj = st.session_state.wrapped_models.get(viz_model_name)
+                if nd1 == nd2:
+                    st.warning("Pick two different drugs.")
+                elif not model_obj:
+                    st.error("Model not found. Please re-run analysis.")
+                elif st.button("Draw Δ Surface", key="null_draw"):
+                    max_d1 = st.session_state.exp_df[nd1].max()
+                    max_d2 = st.session_state.exp_df[nd2].max()
+                    fixed_vars = {d: 0.0 for d in st.session_state.independent_vars if d not in [nd1, nd2]}
+                    with st.spinner("Computing null surface and Δ..."):
+                        x_g, y_g, z_g, _ = calculate_synergy_surface_grid(
+                            model=model_obj, drug1=nd1, drug2=nd2, fixed_vars=fixed_vars,
+                            range1=(0, max_d1), range2=(0, max_d2), method="bliss")
+                        rows = [{**fixed_vars, nd1: float(x_g[i, j]), nd2: float(y_g[i, j])}
+                                for i in range(x_g.shape[0]) for j in range(x_g.shape[1])]
+                        ref = reference_surface(nmethod.lower(), rows, usable).reshape(x_g.shape)
+                        delta = z_g - ref
+                        cmax = float(np.nanmax(np.abs(delta))) or 1.0
+
+                        d1_desc = st.session_state.variable_descriptions.get(nd1, nd1)
+                        d2_desc = st.session_state.variable_descriptions.get(nd2, nd2)
+                        fig = plot_response_surface(
+                            dataframe=st.session_state.exp_df, OLS_model_1=model_obj,
+                            all_alphabet_vars=st.session_state.independent_vars,
+                            x_var=nd1, y_var=nd2, z_var_1=viz_effect_col,
+                            fixed_vars_dict_1=fixed_vars,
+                            variable_descriptions=st.session_state.variable_descriptions,
+                            show_actual_data=False,
+                            x_grid_override=x_g, y_grid_override=y_g, z_grid_override=z_g,
+                            surfacecolor=delta, surfacecolor_colorscale=_DELTA_COLORSCALE,
+                            surfacecolor_cmin=-cmax, surfacecolor_cmax=cmax,
+                            surfacecolor_label=f"Δ vs {nmethod} (green = synergy)",
+                            main_title=f"Model surface — Δ vs {nmethod}",
+                            z_title=viz_effect_col, x_title=d1_desc, y_title=d2_desc,
+                        )
+                        fig_null = plot_response_surface(
+                            dataframe=st.session_state.exp_df, OLS_model_1=model_obj,
+                            all_alphabet_vars=st.session_state.independent_vars,
+                            x_var=nd1, y_var=nd2, z_var_1=viz_effect_col,
+                            fixed_vars_dict_1=fixed_vars,
+                            variable_descriptions=st.session_state.variable_descriptions,
+                            show_actual_data=False,
+                            x_grid_override=x_g, y_grid_override=y_g, z_grid_override=ref,
+                            main_title=f"Null surface ({nmethod})",
+                            z_title=viz_effect_col, x_title=d1_desc, y_title=d2_desc,
+                        )
+                        cM, cN = st.columns(2)
+                        cM.plotly_chart(fig, width="stretch")
+                        cN.plotly_chart(fig_null, width="stretch")
+
+                        m1, m2, m3 = st.columns(3)
+                        m1.metric("Mean Δ", f"{np.nanmean(delta):.2f}")
+                        m2.metric("Min Δ (peak synergy)", f"{np.nanmin(delta):.2f}")
+                        m3.metric("Synergistic area (Δ < 0)", f"{np.mean(delta < 0) * 100:.0f}%")
