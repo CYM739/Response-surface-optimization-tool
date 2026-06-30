@@ -47,14 +47,6 @@ def initialize_session_state():
         # Hill Fit / DRI States
         st.session_state.hill_fits = None   # {dep_var: {drug: HillFit}} — set after analysis
 
-        # BRAID Lookup States
-        st.session_state.braid_lookup_result = None
-        st.session_state.braid_lookup_query  = None
-        st.session_state.braid_opt_result    = None
-
-        # Data source type: "csv" or "braid"
-        st.session_state.data_source_type = "csv"
-
         # Set experimental features to be unlocked by default
         st.session_state.experimental_unlocked = True
 
@@ -69,7 +61,7 @@ def reset_state():
         'exp_df', 'expanded_df', 'all_vars', 'independent_vars', 'dependent_vars',
         'variable_stats', 'unique_variable_values', 'variable_descriptions',
         'wrapped_models', 'processed_file', 'active_analysis_run',
-        'detected_binary_vars', 'analysis_done', 'data_source_type'
+        'detected_binary_vars', 'analysis_done'
     ]
     for key in keys_to_reset:
         if key in st.session_state:

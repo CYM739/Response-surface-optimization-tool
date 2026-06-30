@@ -38,8 +38,8 @@ def test_title_and_tabs_render_on_cold_boot():
     titles = [t.value for t in at.title]
     assert any("Response Surface" in t for t in titles)
 
-    # The app declares 10 tabs in app.py
-    assert len(at.tabs) == 10
+    # The app declares 8 tabs in app.py
+    assert len(at.tabs) == 8
 
 
 def test_optimizer_tab_guards_when_no_model_loaded():
@@ -85,7 +85,6 @@ def _seed_analyzed_project(at: AppTest, analyzed_demo: dict, trained_ols: dict):
     at.session_state["wrapped_models"] = {dep_var: wrapper}
     at.session_state["processed_file"] = "demo_3drug_dri_fixture"
     at.session_state["active_analysis_run"] = "fixture_run"
-    at.session_state["data_source_type"] = "csv"
     at.session_state["experimental_unlocked"] = True
     at.session_state["hill_fits"] = None
 
@@ -95,7 +94,6 @@ def _seed_analyzed_project(at: AppTest, analyzed_demo: dict, trained_ols: dict):
         "classic_multi_opt_results", "bayesian_opt_results", "bayesian_combo_results",
         "single_opt_report_data", "bayesian_opt_report_data",
         "synergy_matrix", "synergy_drugs", "synergy_model_name",
-        "braid_lookup_result", "braid_lookup_query", "braid_opt_result",
     ]:
         at.session_state[key] = None
 

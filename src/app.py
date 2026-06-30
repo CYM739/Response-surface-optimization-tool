@@ -8,7 +8,7 @@ import json
 import sys
 if not hasattr(np, 'int'):
     np.int = int
-from views import library_view, plotting_view, optimizer_view, ai_optimizer_view, synergy_view, diagnostics_view, elimination_view, braid_surface_view, surface_explorer_view
+from views import library_view, plotting_view, optimizer_view, ai_optimizer_view, synergy_view, diagnostics_view, elimination_view
 from utils import state_management
 from logic.models import RandomForestWrapper
 
@@ -68,13 +68,11 @@ def main():
         "🤖 AI Optimizer",
         "🤝 Synergy Analysis",
         "🗑️ Drug Elimination",
-        "🔬 BRAID Surface",
-        "🧪 Surface Explorer",
         "💾 Session State"
     ]
 
-    # Unpack 10 tabs
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs(tab_list)
+    # Unpack 8 tabs
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(tab_list)
 
     with tab1:
         library_view.render()
@@ -86,14 +84,9 @@ def main():
             st.info("Load and analyze a project from the 'Project Library' to use the plotting tools.")
 
     # Diagnostics Tab (Now covers the old Evaluation features + more)
-    is_braid = st.session_state.get('data_source_type') == 'braid'
     with tab3:
         if analysis_is_done:
-            if is_braid:
-                st.info("OLS Diagnostics are not available for BRAID surfaces. "
-                        "Use the Plotting, Optimizer, or Synergy tabs instead.")
-            else:
-                diagnostics_view.render()
+            diagnostics_view.render()
         else:
             st.info("Load and analyze a project from the 'Project Library' to view OLS diagnostics.")
 
@@ -125,22 +118,12 @@ def main():
             
     with tab7:
         if analysis_is_done:
-            if is_braid:
-                st.info("Drug Elimination scoring is not available for BRAID surfaces. "
-                        "Use the Plotting, Optimizer, or Synergy tabs instead.")
-            else:
-                elimination_view.render()
+            elimination_view.render()
         else:
             st.info("Load and analyze a project from the 'Project Library' to perform drug elimination scoring.")
 
-    with tab8:
-        braid_surface_view.render()
-
-    with tab9:
-        surface_explorer_view.render()
-
     # Session State Tab
-    with tab10:
+    with tab8:
         render_session_state_tab()
 
 def render_session_state_tab():
